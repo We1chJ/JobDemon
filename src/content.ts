@@ -5,7 +5,7 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { config } from './config.js';
 import { db, schema, now } from './db/index.js';
-import { hash, type Profile } from './profile.js';
+import { hash, type CoverLetterTemplate, type Profile } from './profile.js';
 import type { Decider } from './decider/index.js';
 import type { Writer } from './writer/index.js';
 
@@ -20,14 +20,24 @@ function cached(key: string, make: () => Promise<string>) {
   });
 }
 
+const fill = (s: string, job: JobCtx) => s.replaceAll('{company}', job.company).replaceAll('{role}', job.role);
+
+/** Your template around this job's middle paragraphs, dated today. */
+function assemble(t: CoverLetterTemplate, body: string, job: JobCtx) {
+  const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return [t.header.trim(), date, fill(t.salutation.trim(), job), t.opening.trim(), body.trim(), t.closing.trim()].filter(Boolean).join('\n\n');
+}
+
 export async function coverLetter(job: JobCtx, profile: Profile, profileVersion: string, writer: Writer, decider: Decider) {
-  const key = `cl:${profileVersion}:${hash(job.url)}`;
-  const text = await cached(key, async () => {
+  const t = profile.cover_letter?.opening.trim() ? profile.cover_letter : undefined;
+  // With a template only the middle paragraphs are generated (and cached); the letter is assembled fresh each time so the date is current.
+  const key = `${t ? 'clb' : 'cl'}:${profileVersion}:${hash(job.url)}`;
+  const generated = await cached(key, async () => {
     let feedback: string | undefined;
     let best = { text: '', score: -1 };
     for (let attempt = 0; attempt < 3; attempt++) {
-      const draft = await writer.generate({ kind: 'cover_letter', profile, jobDescription: job.jd, company: job.company, role: job.role, feedback });
-      const s = await decider.coverLetterScore(job.jd, draft);
+      const draft = await writer.generate({ kind: t ? 'cover_letter_body' : 'cover_letter', profile, jobDescription: job.jd, company: job.company, role: job.role, feedback });
+      const s = await decider.coverLetterScore(job.jd, t ? assemble(t, draft, job) : draft);
       if (s > best.score) best = { text: draft, score: s };
       if (s >= config.coverLetterMinScore) break;
       feedback = `scored ${s.toFixed(1)}/4 for relevance; make it more specific to this job description.`;
@@ -35,6 +45,7 @@ export async function coverLetter(job: JobCtx, profile: Profile, profileVersion:
     if (best.score < config.coverLetterMinScore) throw new LowQualityError(`Cover letter scored ${best.score.toFixed(1)}/4 after 3 drafts`);
     return best.text;
   });
+  const text = t ? assemble(t, generated, job) : generated;
   fs.mkdirSync(config.lettersDir, { recursive: true });
   const file = path.join(config.lettersDir, `${job.appId}-cover-letter.txt`);
   fs.writeFileSync(file, text);

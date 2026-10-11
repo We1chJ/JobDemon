@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import type { Profile } from '../profile.js';
 
 export interface GenerateInput {
-  kind: 'cover_letter' | 'paragraph';
+  kind: 'cover_letter' | 'cover_letter_body' | 'paragraph';
   profile: Profile;
   jobDescription: string;
   company: string;
@@ -20,6 +20,14 @@ Hard rules:
 - Plain text, first person, no placeholders like [Company], no markdown, no sign-off address block.`;
 
 function userPrompt(i: GenerateInput) {
+  const t = i.profile.cover_letter;
+  if (i.kind === 'cover_letter_body' && t) {
+    return `PROFILE:\n${JSON.stringify({ fields: i.profile.fields, facts: i.profile.facts }, null, 1)}\n\nJOB DESCRIPTION (from the apply page):\n${i.jobDescription.slice(0, 8000)}\n\nTHE LETTER'S FIXED OPENING PARAGRAPH (already written, do not repeat it):\n${t.opening}\n\nTHE APPLICANT'S OWN EXAMPLE MIDDLE PARAGRAPHS (written for a different company; facts in them are true and may be used):\n${t.examples}\n\nTASK: Write the two middle paragraphs of the cover letter for the ${i.role} role at ${i.company}, 170-260 words in total, separated by one blank line.
+- Paragraph 1: connect the applicant's real experience (PROFILE and the example paragraphs) to what this job asks for.
+- Paragraph 2: why ${i.company} and this role specifically, using details from the job description.
+- Match the voice, rhythm and confidence of the example paragraphs and reuse their phrasing where it fits, but replace anything specific to the other company or role.
+- Output only the two paragraphs: no greeting, no opening paragraph, no sign-off.${i.feedback ? `\n\nA previous draft was rejected: ${i.feedback}` : ''}`;
+  }
   const task = i.kind === 'cover_letter'
     ? `Write a cover letter (180-280 words) for the ${i.role} role at ${i.company}. Connect 2-3 concrete profile facts to the job's needs. End with "${i.profile.fields.full_name ?? ''}".`
     : `Answer this application question in 80-180 words: "${i.question}". Role: ${i.role} at ${i.company}.`;
@@ -41,6 +49,7 @@ class OpenAIWriter implements Writer {
 
 class FakeWriter implements Writer {
   async generate(i: GenerateInput) {
+    if (i.kind === 'cover_letter_body') return `My experience fits the ${i.role} role. ${String(i.profile.facts.summary ?? '')}\n\n${i.company} excites me because of this role.`;
     return i.kind === 'cover_letter'
       ? `Dear ${i.company} team,\n\nI am applying for the ${i.role} role. ${String(i.profile.facts.summary ?? '')}\n\n${i.profile.fields.full_name ?? ''}`
       : `${String(i.profile.facts.summary ?? '')} (answer to: ${i.question})`;

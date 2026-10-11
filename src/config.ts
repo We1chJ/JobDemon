@@ -14,10 +14,9 @@ export const config = {
   lettersDir: path.join(dataDir, 'letters'),
   tracesDir: path.join(dataDir, 'traces'),
 
-  // Safety: dry-run fills everything but never clicks the final submit.
-  // Set LIVE=1 to submit for real, or approve single applications from the review UI.
-  live: process.env.LIVE === '1',
-  headless: process.env.HEADLESS !== '0',
+  // The bot never submits. Filled forms stay open in a visible browser window for you to submit.
+  // HEADLESS=1 hides the browser (forms are still filled, but you can't see them).
+  headless: process.env.HEADLESS === '1',
   concurrency: Number(process.env.CONCURRENCY ?? 1),
   maxSteps: Number(process.env.MAX_STEPS ?? 60),
 
@@ -26,7 +25,6 @@ export const config = {
   openaiModel: process.env.OPENAI_MODEL ?? 'gpt-4.1',
 
   // Confidence thresholds for Jev gates.
-  submitConfirmThreshold: 0.9,
   coverLetterMinScore: 2.5,
   uiPort: Number(process.env.UI_PORT ?? 3000),
 };

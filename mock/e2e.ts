@@ -8,19 +8,24 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobdemon-e2e-'));
 process.env.DATA_DIR = dir;
 process.env.DECIDER ??= 'fake';
 process.env.WRITER ??= 'fake';
-delete process.env.LIVE;
+process.env.HEADLESS = '1';
 
-const { startMock, submissions } = await import('./server.js');
+const { startMock, submissions, stats } = await import('./server.js');
 const { config } = await import('../src/config.js');
-const { db, schema, updateApp } = await import('../src/db/index.js');
+const { db, schema } = await import('../src/db/index.js');
 const { saveProfile } = await import('../src/profile.js');
 const { enqueue, normalizeUrl } = await import('../src/intake.js');
 const { processQueue } = await import('../src/run.js');
+const { openFormPage, isFormOpen, closeBrowser, newApplicationContext } = await import('../src/agent/browser.js');
 const { eq } = await import('drizzle-orm');
 
 const server = startMock(4100);
 const tpl = (f: string) => JSON.parse(fs.readFileSync(path.join(config.templatesDir, f), 'utf8'));
-saveProfile(tpl('profile.example.json'), tpl('answer_bank.example.json'));
+const OPENING = 'I care about two things: create and challenge. This paragraph never changes.';
+saveProfile({ ...tpl('profile.example.json'), cover_letter: {
+  header: 'Jane Doe\njane@example.com', salutation: 'To the {company} Selection Committee,', opening: OPENING,
+  examples: 'My experience paragraph.\n\nWhy OtherCo paragraph.', closing: 'Sincerely,\n\nJane Doe',
+} }, tpl('answer_bank.example.json'));
 fs.writeFileSync(config.resumePath, '%PDF-1.4 fake resume');
 
 let failed = 0;
@@ -34,37 +39,83 @@ try {
 
   await processQueue();
   const a1 = get(u(1)), a2 = get(u(2)), a3 = get(u(3));
-  check('dry-run fills job 1 and stops before submit', a1.status === 'ready_to_submit', `${a1.status}: ${a1.reason}`);
-  check('dry-run never submits', submissions.length === 0);
+  check('job 1 is filled and stops at the submit button', a1.status === 'ready_to_submit', `${a1.status}: ${a1.reason}`);
+  check('nothing was submitted', submissions.length === 0);
   check('CAPTCHA goes to human review', a2.status === 'human_review' && /CAPTCHA/.test(a2.reason ?? ''), `${a2.status}: ${a2.reason}`);
   check('missing required data goes to human review', a3.status === 'human_review' && /clearance/i.test(a3.reason ?? ''), `${a3.status}: ${a3.reason}`);
+  check('a CAPTCHA does not stop the rest of the form being filled', (await openFormPage(a2.id)!.locator('#email').inputValue()) === 'jane@example.com');
+  check('it keeps filling past a question it cannot answer', (await openFormPage(a3.id)!.locator('#first_name').inputValue()) === 'Jane' && (await openFormPage(a3.id)!.locator('#why').inputValue()).length > 20);
+  const { newQuestions } = await import('../src/questions.js');
+  const nq = newQuestions();
+  check('unanswered required question saved for Setup', nq.some((q) => /clearance/i.test(q.label) && q.required), JSON.stringify(nq.map((q) => q.label)));
+  check('empty profile field saved for Setup as a profile question', nq.some((q) => q.key === 'profile:mailing_address' && q.required), JSON.stringify(nq.map((q) => q.key)));
+  check('"If so, please explain" is never sent to Setup', !nq.some((q) => /if so/i.test(q.label)));
+  check('unanswered dropdown saved with its choices', nq.some((q) => q.label === 'Willing to travel?' && q.options.join() === 'Yes,No'));
   check('company/role read off page', a1.company === 'Mockco' && a1.role === 'Backend Engineer', `${a1.company} / ${a1.role}`);
+  check('filled form is left open for the applicant', isFormOpen(a1.id));
+  check('applications needing help are left open to finish by hand', isFormOpen(a2.id) && isFormOpen(a3.id));
 
-  // Approve job 1 in the UI → submits for real (to the mock) and verifies.
-  updateApp(a1.id, { live: true, status: 'queued' });
-  await processQueue();
-  const done = get(u(1));
-  check('approved application is submitted and verified', done.status === 'applied', `${done.status}: ${done.reason}`);
-  const s = submissions[0]?.fields ?? {};
-  check('mock received exactly one submission', submissions.length === 1);
-  check('structured fields mapped from profile', s.first_name === 'Jane' && s.email === 'jane@example.com' && s.linkedin === 'https://www.linkedin.com/in/janedoe', JSON.stringify({ f: s.first_name, e: s.email }));
-  check('answer bank used for select + radio', s.auth === 'Yes' && s.sponsor === 'no', `auth=${s.auth} sponsor=${s.sponsor}`);
-  check('resume uploaded as-is', /^file:resume\.pdf:\d+$/.test(s.resume ?? ''), s.resume);
-  check('cover letter + paragraph generated', (s.cover_letter ?? '').includes('Mockco') && (s.why ?? '').length > 20);
-  check('EEO declined, not guessed', s.gender === 'Decline To Self Identify', s.gender);
-  check('trace screenshots written', fs.readdirSync(path.join(config.tracesDir, String(done.id))).length > 5);
+  // Read what the bot typed straight from the open form.
+  const page = openFormPage(a1.id)!;
+  const val = (sel: string) => page.locator(sel).inputValue();
+  check('structured fields mapped from profile', (await val('#first_name')) === 'Jane' && (await val('#email')) === 'jane@example.com' && (await val('#linkedin')) === 'https://www.linkedin.com/in/janedoe');
+  check('answer bank used for select + radio', (await page.locator('#auth').evaluate((s: HTMLSelectElement) => s.options[s.selectedIndex].text)) === 'Yes' && (await page.locator('input[name=sponsor][value=no]').isChecked()));
+  check('resume attached as-is', (await page.locator('#resume').evaluate((i: HTMLInputElement) => i.files?.[0]?.name)) === 'resume.pdf');
+  const letter = await val('#cover_letter');
+  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  check('cover letter uses your template: header, date, company greeting, fixed opening, sign-off',
+    letter.startsWith('Jane Doe\njane@example.com\n\n' + today + '\n\nTo the Mockco Selection Committee,\n\n' + OPENING + '\n\n') && letter.endsWith('Sincerely,\n\nJane Doe') && !letter.includes('OtherCo'));
+  check('the form tab shows the generated cover letter in a corner panel', (await page.locator('#jobdemon-letter pre').innerText()).includes(OPENING) && (await page.locator('#jobdemon-letter pre').innerText()) === letter);
+  check('cover letter + paragraph generated', (await val('#cover_letter')).includes('Mockco') && (await val('#why')).length > 20);
+  check('EEO declined, not guessed', (await page.locator('#gender').evaluate((s: HTMLSelectElement) => s.options[s.selectedIndex].text)) === 'Decline To Self Identify');
+  check('non-compete answered from the answer bank', (await val('#noncompete')) === 'No');
+  check('follow-up to a "No" answer is left blank', (await val('#noncompete_explain')) === '');
+  check('custom dropdown picked from its list', (await val('#country')) === 'United States +1' && (await page.locator('input[name=country]').inputValue()) === 'United States +1', await val('#country'));
+  check('hidden dropdown helpers are not treated as fields', !db.select().from(schema.stepLog).all().some((s) => s.target === 'Select...'));
+  check('trace screenshots written', fs.readdirSync(path.join(config.tracesDir, String(a1.id))).length > 5);
 
-  // Re-running must not double-submit.
+  // An unreliable decider (low confidence, no target, every other step) must not stop the form.
+  process.env.FAKE_FLAKY = '1';
+  enqueue([u(4)]);
   await processQueue();
-  check('re-run does not resubmit', submissions.length === 1);
+  delete process.env.FAKE_FLAKY;
+  const a4 = get(u(4));
+  const p4 = openFormPage(a4.id);
+  check('unsure decisions never stop filling: whole form done', a4.status === 'ready_to_submit' && !!p4 && (await p4.locator('#why').inputValue()).length > 20 && (await p4.locator('#gender').inputValue()) !== '', `${a4.status}: ${a4.reason}`);
 
-  // Simulated crash right after clicking submit: must escalate, never click again.
-  enqueue([u(1, '?crash=1')]);
-  const crashed = get(u(1, '?crash=1'));
-  updateApp(crashed.id, { status: 'in_progress', submitClickedAt: new Date().toISOString(), live: true });
+  // Getting to the form: tabs, multi-step forms, new tabs, embedded forms.
+  enqueue([u(5), u(6), u(7), u(8), u(9)]);
   await processQueue();
-  check('crash after submit escalates instead of resubmitting', get(u(1, '?crash=1')).status === 'human_review' && submissions.length === 1);
+  const [a5, a6, a7, a8, a9] = [5, 6, 7, 8, 9].map((n) => get(u(n)));
+  const p5 = openFormPage(a5.id), p6 = openFormPage(a6.id), p7 = openFormPage(a7.id), p8 = openFormPage(a8.id);
+  check('Ashby-style: opens the Application tab from the overview, then fills it', a5.status === 'ready_to_submit' && !!p5 && p5.url().endsWith('/jobs/5/application') && (await p5.locator('#first_name').inputValue()) === 'Jane', `${a5.status}: ${a5.reason} @ ${p5?.url()}`);
+  check('Ashby-style Yes/No buttons answered from the answer bank', (await p5!.locator('[data-option=yes]').getAttribute('aria-pressed')) === 'true');
+  check('"Autofill from resume" upload is left alone', (await p5!.locator('#autofill').evaluate((i: HTMLInputElement) => i.files?.length ?? 0)) === 0);
+  check('multi-step: fills step 1, clicks Next, fills step 2, stops at the review page', a6.status === 'ready_to_submit' && !!p6 && (await p6.locator('#why').inputValue()).length > 20 && await p6.locator('#s3').isVisible(), `${a6.status}: ${a6.reason}`);
+  check('follows an "Apply now" link that opens a new tab', a7.status === 'ready_to_submit' && !!p7 && p7.url().endsWith('/jobs/7/application') && (await p7.locator('#email').inputValue()) === 'jane@example.com', `${a7.status}: ${a7.reason} @ ${p7?.url()}`);
+  check('opens a form embedded in an iframe', a8.status === 'ready_to_submit' && !!p8 && p8.url().includes('/embed/job_app') && (await p8.locator('#first_name').inputValue()) === 'Jane', `${a8.status}: ${a8.reason} @ ${p8?.url()}`);
+  check('no form anywhere: says so instead of claiming it filled something', a9.status === 'human_review' && /couldn't find the application form/i.test(a9.reason ?? ''), `${a9.status}: ${a9.reason}`);
+  check('still nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);
+
+  // Re-running does not touch filled applications.
+  await processQueue();
+  check('re-run leaves filled applications alone', get(u(1)).status === 'ready_to_submit' && submissions.length === 0);
+
+  // Backstop: while the bot is working, even a forced form submission is refused.
+  const botCtx = await newApplicationContext();
+  const botPage = await botCtx.newPage();
+  await botPage.goto(u(1));
+  await botPage.evaluate(() => (document.querySelector('form') as HTMLFormElement).submit()).catch(() => {});
+  await botPage.waitForTimeout(1000);
+  check('bot browser refuses form submissions', stats.posts === 0, `${stats.posts} attempt(s) reached the server`);
+  await botCtx.close();
+
+  // Once handed over, YOU can submit the filled form in that same tab.
+  await Promise.all([page.waitForLoadState('load').catch(() => {}), page.locator('button[type=submit]').click()]);
+  await page.waitForTimeout(500);
+  check('you can submit the handed-over form yourself', submissions.length === 1 && submissions[0].fields.first_name === 'Jane');
 } finally {
+  await closeBrowser();
   server.close();
   console.log(failed ? `\n${failed} check(s) failed. Data kept at ${dir}` : `\nAll checks passed.`);
   if (!failed) fs.rmSync(dir, { recursive: true, force: true });

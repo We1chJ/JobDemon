@@ -1,37 +1,60 @@
 # JobDemon
 
-Local bot that applies to job URLs you provide. Jev (TypeSafe) decides each browser step,
-OpenAI writes cover letters and open-ended answers, everything else comes from your profile.
+Local bot that fills in job applications for the links you give it. **It never submits.**
+Each filled form is left open in a browser window; you review it and click Submit yourself.
+Jev (TypeSafe) decides each browser step, OpenAI writes cover letters and open-ended answers,
+and everything else comes from your profile.
 
 ## Run it
 ```
 npm start
 ```
 Then open http://localhost:3000. Everything happens in that page:
-1. **Setup tab**: upload your resume PDF, edit your profile and answer bank, click Save.
-2. **Applications tab**: paste job links (one per line) and click **Add links & run**.
-3. Each link ends as **ready to submit** (form filled, waiting for you), **human review**
-   (the bot couldn't finish; the reason is shown), or **applied**. Click a row's number to see
-   every step with screenshots and the cover letter.
-4. Click **Approve & submit** on a ready application to submit it for real.
+1. **Setup tab**: upload your resume PDF (it fills your profile for you to check), answer the
+   screening questions, and save your profile.
+2. **Applications tab**: paste job links (one per line) and click **Add & run**. A browser window
+   opens and the bot fills each form in its own tab.
+3. Each link ends as:
+   - **Filled in**: every field is done and the bot stopped at the Submit button. Click
+     **Show filled form**, check it, and submit it yourself in that window.
+   - **Needs you**: the bot got stuck (CAPTCHA, login, a question your profile doesn't answer).
+     The half-filled form is still open: click **Finish in browser** and complete it.
+4. After submitting, click **I submitted it** to mark it applied.
+
+Click a row's title to see every step with screenshots and the cover letter.
+
+Filled forms stay open until you close the browser window or stop the app. If one is gone,
+click **Fill again**.
 
 API keys live in `.env` (`TYPESAFE_API_KEY`, `OPENAI_API_KEY`, optional `OPENAI_MODEL`).
 
-**Dry-run is the default.** Nothing is submitted until you approve it. `LIVE=1 npm start`
-submits everything without asking. `HEADLESS=0 npm start` shows the browser while it works.
+Terminal alternative: `npm run apply -- urls.txt` fills a file of links, then waits until you
+close the browser window.
 
-Terminal alternative: `npm run apply -- urls.txt` queues a file of links and runs them.
+## Getting to the form
+Links don't have to point straight at the form. The bot works out which situation a page is in:
+- **Job posting only**: it clicks the way in ("Apply", an "Application" tab, a link that opens a new tab),
+  or opens a form embedded in an iframe.
+- **Form with empty fields**: it fills every one.
+- **Every field filled, with a Next / Continue button**: it moves to the next step and keeps filling.
+- **Final button** (submit, or a review page after filling): it stops and hands the form to you.
+- **Sign-in / create-account page**: it hands it to you.
+
+It remembers which clicks it already tried, so it never loops between tabs, and makes at most 10 navigation clicks.
 
 ## Safety rules built in
-- CAPTCHA, login walls, missing required data, EEO questions with no "decline" option,
-  low-confidence decisions and unverified submits all go to the human-review queue.
-- The submit click is recorded *before* clicking; a crashed run never clicks submit again.
-- An application counts as `applied` only when Jev confirms the confirmation page (≥ 0.9).
+- The bot never clicks a final button (submit, send, apply, finish, complete, confirm) once it has
+  filled anything. Before that, "Apply" only opens the application, which is safe.
+- Backstop: the bot's browser refuses every form-submission page load, so even a mistaken
+  click can't send a classic form. (A site that submits purely with background JavaScript
+  isn't covered by this backstop; the first rule still applies.)
+- CAPTCHA, login walls, missing required data, EEO questions with no "decline" option and
+  low-confidence decisions go to "Needs you".
 - Duplicate (company, role, you) postings are skipped.
 
 ## Settings (env)
-`LIVE=1` · `HEADLESS=0` (watch the browser) · `CONCURRENCY=2` · `MAX_STEPS=60` ·
-`DECIDER=fake` / `WRITER=fake` (offline stand-ins)
+`HEADLESS=1` (hide the browser; forms are filled but you can't see them) · `CONCURRENCY=2` ·
+`MAX_STEPS=60` · `DECIDER=fake` / `WRITER=fake` (offline stand-ins)
 
 ## Test
 `npm run test:e2e` runs the full pipeline against a local mock job board with the offline

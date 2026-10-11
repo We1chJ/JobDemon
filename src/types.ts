@@ -27,3 +27,10 @@ export const isFileInput = (e: ElementInfo) => e.tag === 'input' && e.type === '
 export const isFillable = (e: ElementInfo) =>
   e.tag === 'textarea' || e.tag === 'select' || e.tag === 'combobox' || e.tag === 'radio' ||
   (e.tag === 'input' && !['submit', 'button', 'hidden', 'reset', 'image'].includes(e.type));
+
+/** "Willing to travel? / Willing to travel?*" -> "Willing to travel?" */
+export function cleanLabel(label: string) {
+  const parts = [...new Set(label.split(' / ').map((p) => p.replace(/\*+\s*$/, '').trim()).filter((p) => p && !/^placeholder:/i.test(p)))];
+  const q = parts.find((p) => p.endsWith('?'));
+  return (q ?? parts.sort((a, b) => b.length - a.length)[0] ?? label).slice(0, 200);
+}

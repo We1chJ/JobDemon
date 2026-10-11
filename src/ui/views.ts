@@ -33,7 +33,7 @@ export const icon = (name: keyof typeof PATHS | string, cls = '') =>
 // ── Status vocabulary (text + icon + colour, never colour alone) ────────────
 export const STATUS: Record<string, { label: string; tone: string; icon: string; hint: string }> = {
   human_review: { label: 'Needs you', tone: 'warn', icon: 'alert', hint: 'The bot stopped and needs a decision' },
-  ready_to_submit: { label: 'Ready to submit', tone: 'info', icon: 'send', hint: 'Filled in, waiting for your approval' },
+  ready_to_submit: { label: 'Filled in', tone: 'info', icon: 'file', hint: 'Filled in and left open in the browser. Submit it yourself.' },
   in_progress: { label: 'Running', tone: 'violet', icon: 'loader', hint: 'The bot is working on it now' },
   queued: { label: 'Queued', tone: 'neutral', icon: 'clock', hint: 'Waiting for the next run' },
   applied: { label: 'Applied', tone: 'ok', icon: 'checkCircle', hint: 'Submitted and confirmed' },
@@ -50,7 +50,7 @@ export const OPS: Record<string, { label: string; tone: string }> = {
   'TYPE_TEXT:escalate': { label: 'Missing', tone: 'warn' }, 'SELECT:escalate': { label: 'Missing', tone: 'warn' }, 'CLICK:escalate': { label: 'Missing', tone: 'warn' },
   CLICK: { label: 'Clicked', tone: 'neutral' }, SCROLL: { label: 'Scrolled', tone: 'neutral' }, WAIT: { label: 'Waited', tone: 'neutral' },
   SUBMIT: { label: 'Submitted', tone: 'info' }, VERIFY: { label: 'Verified', tone: 'info' }, APPLIED: { label: 'Applied', tone: 'ok' },
-  DRY_RUN_STOP: { label: 'Paused', tone: 'info' }, ESCALATE: { label: 'Needs you', tone: 'warn' }, DUPLICATE: { label: 'Duplicate', tone: 'neutral' },
+  FILLED: { label: 'Stopped', tone: 'info' }, ESCALATE: { label: 'Needs you', tone: 'warn' }, DUPLICATE: { label: 'Duplicate', tone: 'neutral' },
 };
 
 export function ago(iso: string) {
@@ -224,6 +224,15 @@ input[type=file]::file-selector-button{font:600 14px var(--font);border:1px soli
 .sticky-save{position:sticky;bottom:0;z-index:5;margin:20px -16px 0;padding:12px 16px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:12px;align-items:center}
 @media (max-width:640px){.sticky-save .help{display:none}.sticky-save .btn{width:100%}}
 
+/* cover letter peek in the list */
+.peek{margin-top:8px}
+.peek summary{cursor:pointer;display:inline-flex;align-items:center;gap:6px;color:var(--action);font-size:14px;font-weight:500;min-height:32px;list-style:none}
+.peek summary::-webkit-details-marker{display:none}
+@media (prefers-color-scheme:dark){.peek summary{color:#93C5FD}}
+.peek summary .ic{width:15px;height:15px}
+.peek-body{margin-top:6px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2)}
+.peek-body .letter{font-size:14px;max-height:420px;overflow:auto;margin-bottom:10px}
+
 /* screening questions */
 .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .q{border:0;margin:0;padding:18px 0;border-top:1px solid var(--border);min-width:0}
@@ -298,6 +307,20 @@ if (sf) {
   });
   update();
 }
+// Copy buttons.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; } catch { b.textContent = 'Copy failed'; }
+  setTimeout(() => { b.textContent = 'Copy text'; }, 1500);
+});
+// Typing an "Other" answer anywhere selects its choice.
+document.addEventListener('input', (e) => {
+  if (e.target.matches && e.target.matches('.choice-other input[type=text]')) {
+    const r = e.target.closest('label').querySelector('input[type=radio]');
+    if (r && !r.checked) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+});
 // Repeatable rows: add from a <template>, remove a row.
 document.addEventListener('click', (e) => {
   const add = e.target.closest('[data-add]');
@@ -327,10 +350,8 @@ document.addEventListener('click', (e) => {
 })();
 `;
 
-export function layout(opts: { title: string; active: 'apps' | 'setup' | ''; live: boolean }, body: Html | Html[] | string) {
-  const mode = opts.live
-    ? html`<span class="mode badge t-danger" title="Applications are submitted without asking">${icon('zap')}<span>Live</span></span>`
-    : html`<span class="mode badge t-ok" title="Nothing is submitted until you approve it">${icon('shield')}<span>Dry-run</span></span>`;
+export function layout(opts: { title: string; active: 'apps' | 'setup' | '' }, body: Html | Html[] | string) {
+  const mode = html`<span class="mode badge t-ok" title="The bot fills forms but never submits them">${icon('shield')}<span>Fill only</span></span>`;
   return html`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${opts.title} · JobDemon</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#1E3A5F"/><g fill="none" stroke="#fff" stroke-width="2" transform="translate(4 4) scale(.67)"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></g></svg>')}">

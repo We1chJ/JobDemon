@@ -33,23 +33,46 @@ export async function setCheckbox(page: Page, e: ElementInfo, checked: boolean) 
 /** Select an option by index for native selects and radio groups. */
 export async function chooseOption(page: Page, e: ElementInfo, index: number) {
   if (e.tag === 'radio') {
-    await page.locator(`[data-jd-opt="${e.idx}:${index}"]`).check({ timeout: TIMEOUT, force: true });
+    const opt = page.locator(`[data-jd-opt="${e.idx}:${index}"]`);
+    // Real radio buttons get checked; button-style choices (e.g. Ashby Yes/No) get clicked.
+    if (await opt.evaluate((n) => n.tagName === 'INPUT')) await opt.check({ timeout: TIMEOUT, force: true });
+    else await opt.click({ timeout: TIMEOUT });
   } else {
     await (await assertFresh(page, e)).selectOption({ label: e.options![index] }, { timeout: TIMEOUT });
   }
 }
 
-/** Autocomplete / custom dropdown: type, then return the suggestions that appear. */
-export async function openCombobox(page: Page, e: ElementInfo, text: string): Promise<string[]> {
+// Custom dropdowns / autocomplete (react-select style).
+const visibleOptions = (page: Page) => page.locator('[role=option]:visible').allInnerTexts().then((o) => o.map((t) => t.trim()));
+
+/** Open the dropdown without typing and return the options it shows. */
+export async function comboboxOptions(page: Page, e: ElementInfo): Promise<string[]> {
   const l = await assertFresh(page, e);
   await l.click({ timeout: TIMEOUT });
-  await l.fill(text, { timeout: TIMEOUT });
-  await page.waitForTimeout(600);
-  return page.locator('[role=option]:visible').allInnerTexts();
+  await page.waitForTimeout(500);
+  return visibleOptions(page);
+}
+
+/** Type to search (for async lists such as cities or long, truncated lists such as schools). */
+export async function comboboxSearch(page: Page, e: ElementInfo, text: string): Promise<string[]> {
+  await loc(page, e).fill(text, { timeout: TIMEOUT });
+  await page.waitForTimeout(900);
+  return visibleOptions(page);
+}
+
+/** Clear any typed search and show the full list again. */
+export async function comboboxReset(page: Page, e: ElementInfo): Promise<string[]> {
+  await loc(page, e).fill('', { timeout: TIMEOUT });
+  await page.waitForTimeout(400);
+  return visibleOptions(page);
 }
 
 export async function pickComboboxOption(page: Page, index: number) {
   await page.locator('[role=option]:visible').nth(index).click({ timeout: TIMEOUT });
+}
+
+export async function closeCombobox(page: Page) {
+  await page.keyboard.press('Escape').catch(() => {});
 }
 
 export class StaleTargetError extends Error {}

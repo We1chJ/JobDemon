@@ -1,7 +1,7 @@
 import { TypeSafeClient, choice, noul, score } from '@typesafe-ai/sdk';
 import { describe, isFileInput, isFillable, OPS, type ElementInfo, type Op } from '../types.js';
 import type { BankEntry } from '../profile.js';
-import { SPECIAL_KEYS, type Decider } from './types.js';
+import { SPECIAL_KEYS, STAGES, type Decider, type NavContext, type Stage } from './types.js';
 
 const MAX_ELEMENTS = 80;
 
@@ -19,10 +19,11 @@ export class JevDecider implements Decider {
   private client = new TypeSafeClient();
 
   async nextAction(ctx: { goal: string; url: string; elements: ElementInfo[]; recent: string[] }) {
-    const els = ctx.elements.slice(0, MAX_ELEMENTS);
+    // Fields first, so links in a long page never crowd them out of the state.
+    const els = [...ctx.elements.filter((e) => isFillable(e) || isFileInput(e)), ...ctx.elements.filter((e) => !isFillable(e) && !isFileInput(e))].slice(0, MAX_ELEMENTS);
     // Only offer fields that still need filling; buttons become candidates once every field is done.
     // (Offering everything made Jev jump straight to "Submit".)
-    const pending = els.filter((e) => !e.handled && (isFillable(e) || isFileInput(e)));
+    const pending = ctx.elements.filter((e) => !e.handled && (isFillable(e) || isFileInput(e))).slice(0, MAX_ELEMENTS);
     const candidates = pending.length ? pending : els.filter((e) => !isFillable(e) && !isFileInput(e));
     const targets: Record<string, string> = { none: 'No element (for SCROLL, WAIT, DONE, BLOCKED).' };
     for (const e of candidates) targets[`e${e.idx}`] = describe(e);
@@ -51,6 +52,27 @@ export class JevDecider implements Decider {
       target: t === 'none' ? null : Number(t.slice(1)),
       confidence: Math.min(r.answers.op.confidence, t === 'none' ? 1 : r.answers.target.confidence),
     };
+  }
+
+  async navigate(ctx: NavContext) {
+    const clickables = ctx.elements.filter((e) => !isFillable(e) && !isFileInput(e)).slice(0, MAX_ELEMENTS);
+    const targets: Record<string, string> = { none: 'Nothing to click: no way forward, or the only way forward would submit the application.' };
+    for (const e of clickables) targets[`e${e.idx}`] = describe(e);
+    const r = await this.client.systemOne({
+      state: {
+        url: ctx.url,
+        application_fields_filled_on_this_page: ctx.filledHere,
+        application_fields_filled_so_far: ctx.filledTotal,
+        fields_on_this_page: ctx.elements.filter((e) => isFillable(e) || isFileInput(e)).slice(0, 40).map(describe),
+        page_text: ctx.pageText.slice(0, 3000),
+      },
+      questions: {
+        stage: choice('Where is the applicant in the job application?', STAGES),
+        target: choice('Which button, link or tab moves the application forward: opens the application form, or goes to the next step of it? Never a button that submits the application.', targets),
+      },
+    });
+    const t = r.answers.target.choice;
+    return { stage: r.answers.stage.choice as Stage, target: t === 'none' ? null : Number(t.slice(1)), confidence: r.answers.stage.confidence };
   }
 
   async mapField(field: ElementInfo, profileKeys: string[]) {
@@ -94,17 +116,6 @@ export class JevDecider implements Decider {
       questions: { submit: noul('Would clicking this element submit the whole job application?') },
     });
     return r.answers.submit.noul;
-  }
-
-  async submissionCheck(pageText: string, url: string) {
-    const r = await this.client.systemOne({
-      state: { url, page: pageText.slice(0, 6000) },
-      questions: {
-        submitted: noul('Does this page confirm the job application was successfully submitted?'),
-        validationErrors: noul('Is the page showing form validation errors that block submission?'),
-      },
-    });
-    return { submitted: r.answers.submitted.noul, validationErrors: r.answers.validationErrors.noul };
   }
 
   async coverLetterScore(jd: string, letter: string) {

@@ -15,6 +15,8 @@ import { layout, icon, badge, flash, ago, STATUS, OPS } from './views.js';
 import { SCREENING, OTHER, currentChoice, applyChoices } from './screening.js';
 import { FIELD_GROUPS, toForm, fromForm, customFromForm, type Job, type School } from './profileForm.js';
 import { draftFromResume } from '../resumeParse.js';
+import { newQuestions, removeQuestion, ignoreQuestion } from '../questions.js';
+import { isFormOpen, showForm, letterPath } from '../agent/browser.js';
 
 type App = typeof schema.application.$inferSelect;
 
@@ -45,7 +47,7 @@ function setupStatus() {
 const allApps = () => db.select().from(schema.application).orderBy(desc(schema.application.updatedAt)).all();
 const version = (apps: App[]) => `${runState.running}:${apps.length}:${apps[0]?.updatedAt ?? ''}`;
 const STATUS_ORDER = ['human_review', 'ready_to_submit', 'in_progress', 'queued', 'applied', 'duplicate'];
-const FILTERS: [string, string][] = [['all', 'All'], ['human_review', 'Needs you'], ['ready_to_submit', 'Ready'], ['applied', 'Applied'], ['queued', 'Queued'], ['duplicate', 'Skipped']];
+const FILTERS: [string, string][] = [['all', 'All'], ['human_review', 'Needs you'], ['ready_to_submit', 'Filled in'], ['applied', 'Applied'], ['queued', 'Queued'], ['duplicate', 'Skipped']];
 
 const app = new Hono();
 
@@ -60,6 +62,7 @@ app.get('/', (c) => {
   const setup = setupStatus();
   const missing = [!setup.resume && 'upload your resume', !setup.profile && 'replace the example profile', !setup.bank && 'review the example answers'].filter(Boolean);
   const queued = count('queued');
+  const nq = pendingQuestions().length;
 
   const stat = (s: string, n: number) => {
     const m = STATUS[s];
@@ -67,10 +70,12 @@ app.get('/', (c) => {
 <span class="stat-top">${m.label}${icon(m.icon)}</span><span class="stat-num">${n}</span></a>`;
   };
 
-  return c.html(layout({ title: 'Applications', active: 'apps', live: config.live }, html`
+  return c.html(layout({ title: 'Applications', active: 'apps' }, html`
 <div class="page-head"><div><h1>Applications</h1>
-<p class="lede">${config.live ? 'Live mode: the bot submits applications without asking.' : 'Dry-run: the bot fills each form, then waits for your approval before submitting.'}</p></div></div>
+<p class="lede">The bot fills each form and leaves it open in its browser window. It never submits: you review each one and click Submit yourself.</p></div></div>
+${flash(c.req.query('msg'))}
 
+${nq ? html`<div class="callout t-info" role="status">${icon('alert')}<div><b>${nq} new question${nq === 1 ? '' : 's'} from applications.</b> The bot couldn't answer ${nq === 1 ? 'it' : 'them'}. Answer once and every future application uses your answer. <a href="/setup#new-q">Answer now</a></div></div>` : ''}
 ${missing.length ? html`<div class="callout t-warn" role="status">${icon('alert')}<div><b>Finish setup before adding real links.</b> You still need to ${missing.join(', ')}. <a href="/setup">Go to Setup</a></div></div>` : ''}
 
 <section class="card card-pad" aria-labelledby="add-h">
@@ -107,19 +112,29 @@ function row(a: App) {
 <div>${badge(a.status)}</div>
 <div style="min-width:0">
 <a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}${a.company ? html` <span style="font-weight:400;color:var(--muted)">at ${a.company}</span>` : ''}</a>
-<div class="app-meta"><span>#${a.id}</span><span>${ago(a.updatedAt)}</span><a href="${a.url}" target="_blank" rel="noopener" title="${a.url}">${icon('external')}${new URL(a.url).host}</a>${a.live && a.status !== 'applied' ? html`<span>Approved</span>` : ''}</div>
+<div class="app-meta"><span>#${a.id}</span><span>${ago(a.updatedAt)}</span><a href="${a.url}" target="_blank" rel="noopener" title="${a.url}">${icon('external')}${new URL(a.url).host}</a>${isFormOpen(a.id) ? html`<span>Open in browser</span>` : ''}</div>
 ${a.reason && a.status !== 'applied' ? html`<div class="app-reason">${a.reason}</div>` : ''}
+${letterPeek(a.id)}
 </div>
 <div class="app-actions">${actions(a, true)}</div>
 </li>`;
+}
+
+/** The cover letter the bot generated for this application, to cross-check. */
+function letterPeek(id: number) {
+  const text = read(letterPath(id));
+  if (!text) return '';
+  return html`<details class="peek"><summary>${icon('file')}Cover letter</summary>
+<div class="peek-body"><pre class="letter">${text}</pre>
+<button type="button" class="btn btn-sm" data-copy="${text}">Copy text</button></div></details>`;
 }
 
 function actions(a: App, compact = false) {
   const sm = compact ? ' btn-sm' : '';
   const btn = (act: string, label: unknown, cls = '', confirmMsg = '') =>
     html`<form class="inline" method="post" action="/app/${a.id}/${act}" ${confirmMsg ? html`data-confirm="${confirmMsg}"` : ''}><button class="btn${sm} ${cls}">${label}</button></form>`;
-  if (a.status === 'ready_to_submit') return html`${btn('approve', html`${icon('send')}Approve &amp; submit`, 'btn-ok', `Submit this application to ${a.company ?? 'the employer'} for real? This cannot be undone.`)}${btn('applied', 'I submitted it', 'btn-ghost')}`;
-  if (a.status === 'human_review') return html`${btn('applied', html`${icon('check')}I submitted it`)}${a.submitClickedAt ? '' : btn('requeue', 'Retry')}${btn('dismiss', 'Dismiss', 'btn-ghost', 'Dismiss this application?')}`;
+  if (a.status === 'ready_to_submit') return html`${isFormOpen(a.id) ? btn('show', html`${icon('external')}Show filled form`, 'btn-primary') : btn('requeue', html`${icon('play')}Fill again`)}${btn('applied', html`${icon('check')}I submitted it`)}${btn('dismiss', 'Dismiss', 'btn-ghost', 'Dismiss this application?')}`;
+  if (a.status === 'human_review') return html`${isFormOpen(a.id) ? btn('show', html`${icon('external')}Finish in browser`, 'btn-primary') : ''}${btn('applied', html`${icon('check')}I submitted it`)}${btn('requeue', 'Retry')}${btn('dismiss', 'Dismiss', 'btn-ghost', 'Dismiss this application?')}`;
   return '';
 }
 
@@ -137,14 +152,16 @@ app.post('/run', (c) => {
   return c.redirect('/');
 });
 
-app.post('/app/:id/:act', (c) => {
+app.post('/app/:id/:act', async (c) => {
   const id = Number(c.req.param('id'));
   const a = db.select().from(schema.application).where(eq(schema.application.id, id)).get();
   if (!a) return c.notFound();
   switch (c.req.param('act')) {
-    case 'approve': if (a.status === 'ready_to_submit') { updateApp(id, { live: true, status: 'queued', reason: 'Approved: submitting' }); startRun(); } break;
+    case 'show':
+      if (!(await showForm(id))) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Fill again.')}`);
+      break;
     case 'applied': updateApp(id, { status: 'applied', reason: 'Marked applied by you', confidence: 1 }); break;
-    case 'requeue': if (!a.submitClickedAt) { updateApp(id, { status: 'queued', reason: null, step: 0 }); startRun(); } break;
+    case 'requeue': updateApp(id, { status: 'queued', reason: null, step: 0 }); startRun(); break;
     case 'dismiss': updateApp(id, { status: 'duplicate', reason: 'Dismissed by you' }); break;
   }
   const back = c.req.header('referer');
@@ -160,7 +177,7 @@ app.get('/app/:id', (c) => {
   const letter = read(path.join(config.lettersDir, `${id}-cover-letter.txt`));
   const tone = STATUS[a.status]?.tone ?? 'neutral';
 
-  return c.html(layout({ title: a.role ?? `#${id}`, active: 'apps', live: config.live }, html`
+  return c.html(layout({ title: a.role ?? `#${id}`, active: 'apps' }, html`
 <a class="back" href="/">${icon('arrowLeft')}All applications</a>
 <div class="page-head"><div>
 <div style="margin-bottom:8px">${badge(a.status)}</div>
@@ -169,17 +186,16 @@ app.get('/app/:id', (c) => {
 <div class="row">${actions(a)}</div></div>
 
 ${a.reason ? html`<div class="callout t-${tone}">${icon(STATUS[a.status]?.icon ?? 'alert')}<div><b>${STATUS[a.status]?.label ?? a.status}.</b> ${a.reason}</div></div>` : ''}
-${a.submitClickedAt && a.status !== 'applied' ? html`<div class="callout t-danger" role="alert">${icon('shield')}<div><b>Submit was already clicked</b> at ${new Date(a.submitClickedAt).toLocaleString()}. The bot will never click it again for this posting. Check with the company before retrying by hand.</div></div>` : ''}
 
 <section class="card card-pad"><dl class="kv">
 <div><dt>Application</dt><dd>#${a.id}</dd></div>
-<div><dt>Mode</dt><dd>${a.live || config.live ? 'Submit' : 'Dry-run'}</dd></div>
+<div><dt>Filled form</dt><dd>${isFormOpen(a.id) ? 'Open in browser' : 'Not open'}</dd></div>
 <div><dt>Confidence</dt><dd>${a.confidence != null ? `${Math.round(a.confidence * 100)}%` : '—'}</dd></div>
 <div><dt>Steps</dt><dd>${a.step}</dd></div>
 <div><dt>Updated</dt><dd>${ago(a.updatedAt)}</dd></div>
 </dl></section>
 
-${letter ? html`<section class="card card-pad"><div class="card-head">${icon('file')}<h2>Cover letter</h2></div><pre class="letter">${letter}</pre></section>` : ''}
+${letter ? html`<section class="card card-pad"><div class="card-head">${icon('file')}<h2>Cover letter</h2><button type="button" class="btn btn-sm" style="margin-left:auto" data-copy="${letter}">Copy text</button></div><pre class="letter">${letter}</pre></section>` : ''}
 
 <section class="card"><div class="list-head"><h2>Step-by-step trace</h2><span class="help" style="margin:0">${steps.length} step${steps.length === 1 ? '' : 's'}</span></div>
 ${steps.length ? html`<ol class="timeline">${steps.map((s) => {
@@ -213,6 +229,11 @@ async function parseIntoDraft(): Promise<string | null> {
     return (e as Error).message;
   }
 }
+/** New questions still waiting; an empty-profile-field question disappears once that field is filled. */
+const pendingQuestions = () => {
+  const fields = loadProfileFile().fields;
+  return newQuestions().filter((q) => !(q.key.startsWith('profile:') && fields[q.key.slice('profile:'.length)]));
+};
 const back = (msg: string, hash = '') => `/setup?msg=${encodeURIComponent(msg)}${hash}`;
 
 const removeBtn = (what: string) =>
@@ -245,9 +266,11 @@ app.get('/setup', (c) => {
   const bank = st.bank ? loadBankFile() : [];
   const custom = loadBankFile().filter((b) => !SCREENING.some((q) => q.id === b.id));
   const draft = loadDraft();
+  const nqs = pendingQuestions();
+  const cl = loadProfileFile().cover_letter ?? { header: '', salutation: 'To the {company} Selection Committee,', opening: '', examples: '', closing: 'Sincerely,' };
   const pf = toForm(draft ?? loadProfileFile());
 
-  return c.html(layout({ title: 'Setup', active: 'setup', live: config.live }, html`
+  return c.html(layout({ title: 'Setup', active: 'setup' }, html`
 <div class="page-head"><div><h1>Setup</h1><p class="lede">What the bot knows about you. It never invents anything that isn't here.</p></div></div>
 ${flash(c.req.query('msg'))}
 <div class="checklist">
@@ -266,6 +289,22 @@ ${item(st.profile, 'Profile', 'Still the example', '#profile-card')}
 <p class="help" style="margin:10px 0 0">Uploading also reads your resume and fills in the Profile section below for you to check.</p>
 ${st.resume ? html`<form method="post" action="/setup/parse" style="margin-top:12px"><button class="btn btn-sm">${icon('zap')}Fill profile from current resume</button></form>` : ''}
 </section>
+
+${nqs.length ? html`<section class="card card-pad" id="new-q" aria-labelledby="nq-h" style="border-color:color-mix(in srgb,var(--info) 45%,var(--border))">
+<div class="card-head">${icon('alert')}<h2 id="nq-h">New questions from applications</h2><span class="help" style="margin:0 0 0 auto">${nqs.length} waiting</span></div>
+<p class="help" style="margin:0 0 8px">The bot met these on application forms and had no answer. Answer the ones you want remembered and save. Leave any blank to skip it for now.</p>
+<form method="post" action="/setup/questions">
+${nqs.map((q) => html`<fieldset class="q"><legend>${q.label}</legend>
+<p class="help q-help">${q.key.startsWith('profile:') ? 'Saved to your profile · ' : ''}${q.required ? 'Required' : 'Optional'} · seen ${q.seen === 1 ? 'once' : `${q.seen} times`}${q.company ? `, first at ${q.company}` : ''}</p>
+<input type="hidden" name="nq_key" value="${q.key}"><input type="hidden" name="nq_label" value="${q.label}">
+<div class="choices">
+${q.options.length ? html`${q.options.map((o) => html`<label class="choice"><input type="radio" name="nq_${q.key}" value="${o}">${icon('check', 'tick')}<span>${o}</span></label>`)}
+<label class="choice choice-other"><input type="radio" name="nq_${q.key}" value="${OTHER}">${icon('check', 'tick')}<span>Other:</span><input type="text" name="nq_${q.key}__text" aria-label="${q.label} (your own answer)"></label>`
+    : html`<label class="fld wide" style="flex:1"><span class="sr">Your answer</span><input type="text" name="nq_${q.key}__text" placeholder="Your answer, used word for word"></label>`}
+<button class="btn btn-ghost btn-sm" name="ignore" value="${q.key}" formnovalidate>Never ask</button>
+</div></fieldset>`)}
+<div class="row" style="margin-top:16px"><button class="btn btn-primary">${icon('check')}Save answers</button></div>
+</form></section>` : ''}
 
 <section class="card card-pad" id="screening-card" aria-labelledby="s-h">
 <div class="card-head"><span class="step-num">2</span><h2 id="s-h">Screening questions</h2><span class="help progress" style="margin:0 0 0 auto" aria-live="polite"></span></div>
@@ -297,7 +336,7 @@ ${q.other ? html`<label class="choice choice-other"><input type="radio" name="${
 ${draft ? html`<div class="callout t-info" style="margin-top:14px" role="status">${icon('zap')}<div><b>Filled in from your resume. Nothing is saved yet.</b> Check every field, especially dates and links, then click <b>Save profile</b> at the bottom.
 <form method="post" action="/setup/draft/discard" class="inline"><button class="btn btn-ghost btn-sm">Discard draft</button></form></div></div>` : ''}
 <form method="post" action="/setup/profile">
-${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid">${g.fields.map((d) => html`<label class="fld"><span>${d.label}${d.required ? html` <span class="req" aria-hidden="true">*</span>` : ''}</span>
+${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid">${g.fields.map((d) => html`<label class="fld${d.wide ? ' wide' : ''}"><span>${d.label}${d.required ? html` <span class="req" aria-hidden="true">*</span>` : ''}</span>
 <input type="${d.type ?? 'text'}" name="${d.key}" value="${pf.fields[d.key] ?? ''}" ${d.auto ? html`autocomplete="${d.auto}"` : ''} placeholder="${d.placeholder ?? ''}" ${d.required ? 'required' : ''} ${d.type === 'number' ? html`min="0" max="60"` : ''}></label>`)}</div>`)}
 <h3 class="sub">About you</h3>
 <div class="fgrid">
@@ -315,7 +354,31 @@ ${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid"
 <h3 class="sub">Interests <small>Optional</small></h3>
 <label class="fld wide"><span class="sr">Interests</span><textarea name="interests" rows="2" placeholder="What kind of work or products you care about.">${pf.interests}</textarea></label>
 <div class="sticky-save"><span class="help" style="margin:0">Saved to data/profile.json on this computer.</span><button class="btn btn-primary">${icon('check')}Save profile</button></div>
+</form></section>
+
+<section class="card card-pad" id="letter-card" aria-labelledby="cl-h">
+<div class="card-head"><span class="step-num">4</span><h2 id="cl-h">Cover letter</h2></div>
+<p class="help" style="margin:0">Every application gets this letter. Your opening paragraph is used word for word. The middle paragraphs are rewritten for each job from your examples below, connecting your experience to that job's description. Today's date is added automatically.</p>
+<form method="post" action="/setup/cover-letter">
+<div class="fgrid" style="margin-top:16px">
+<label class="fld wide"><span>Header</span><textarea name="header" rows="2" placeholder="Your name&#10;email | phone | links">${cl.header}</textarea><small>Used exactly as written.</small></label>
+<label class="fld wide"><span>Greeting</span><input type="text" name="salutation" value="${cl.salutation}" placeholder="To the {company} Selection Committee,"><small><code>{company}</code> and <code>{role}</code> are filled in for each job.</small></label>
+<label class="fld wide"><span>Opening paragraph <span class="badge t-info" style="margin-left:6px">Fixed</span></span><textarea name="opening" rows="7" placeholder="The paragraph you want on every letter.">${cl.opening}</textarea><small>Never changed by the bot.</small></label>
+<label class="fld wide"><span>Example middle paragraphs <span class="badge t-violet" style="margin-left:6px">Rewritten per job</span></span><textarea name="examples" rows="10" placeholder="Two paragraphs from a letter you've written: your experience, then why this company.">${cl.examples}</textarea><small>The bot writes new versions for each job in this voice, using only facts from here and your profile.</small></label>
+<label class="fld wide"><span>Sign-off</span><textarea name="closing" rows="3" placeholder="Sincerely,&#10;&#10;Your name">${cl.closing}</textarea></label>
+</div>
+<div class="row" style="margin-top:16px"><button class="btn btn-primary">${icon('check')}Save cover letter</button></div>
 </form></section>`));
+});
+
+app.post('/setup/cover-letter', async (c) => {
+  const b = await c.req.parseBody();
+  const v = (k: string) => String(b[k] ?? '').replace(/\r\n/g, '\n').trim();
+  const cover_letter = { header: v('header'), salutation: v('salutation'), opening: v('opening'), examples: v('examples'), closing: v('closing') };
+  if (!cover_letter.opening) return c.redirect(back('Error: nothing was saved because the opening paragraph is empty.', '#letter-card'));
+  if (!cover_letter.examples) return c.redirect(back("Error: nothing was saved because the example paragraphs are empty. The bot needs them to write each job's version.", '#letter-card'));
+  persist({ ...loadProfileFile(), cover_letter }, loadBankFile());
+  return c.redirect(back('Saved your cover letter. New applications will use it.', '#letter-card'));
 });
 
 app.post('/setup/screening', async (c) => {
@@ -324,6 +387,41 @@ app.post('/setup/screening', async (c) => {
   if (missing.length) return c.redirect(back(`Error: nothing was saved because ${missing.length} question${missing.length === 1 ? ' is' : 's are'} unanswered, starting with "${missing[0]}"`, '#screening-card'));
   persist(loadProfileFile(), bank);
   return c.redirect(back(`Saved your ${SCREENING.length} screening answers.`, '#screening-card'));
+});
+
+app.post('/setup/questions', async (c) => {
+  const b = await c.req.parseBody({ all: true });
+  const one = (k: string) => { const v = b[k]; return String(Array.isArray(v) ? v[0] : v ?? '').trim(); };
+  if (b.ignore) {
+    ignoreQuestion(one('ignore'));
+    return c.redirect(back('Okay, the bot will not ask about that question again.', '#new-q'));
+  }
+  const keys = ([] as unknown[]).concat(b.nq_key ?? []).map(String);
+  const labels = ([] as unknown[]).concat(b.nq_label ?? []).map(String);
+  const bank = loadBankFile();
+  const profile = loadProfileFile();
+  let added = 0;
+  keys.forEach((key, i) => {
+    const choice = one(`nq_${key}`);
+    const answer = choice && choice !== OTHER ? choice : one(`nq_${key}__text`);
+    if (!answer) return;
+    if (key.startsWith('profile:')) {
+      // An empty profile field a form asked for (e.g. mailing address): fill it in on the profile.
+      profile.fields[key.slice('profile:'.length)] = answer;
+      removeQuestion(key);
+      added++;
+      return;
+    }
+    const base = labels[i].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'question';
+    let id = base;
+    for (let k = 2; bank.some((e) => e.id === id); k++) id = `${base}_${k}`;
+    bank.push({ id, question: labels[i], answer });
+    removeQuestion(key);
+    added++;
+  });
+  if (!added) return c.redirect(back('Error: nothing was saved because no answers were filled in.', '#new-q'));
+  persist(profile, bank);
+  return c.redirect(back(`Saved ${added} answer${added === 1 ? '' : 's'}. Future applications will use ${added === 1 ? 'it' : 'them'}. Click Retry on any application that needed ${added === 1 ? 'it' : 'them'}.`, '#custom-card'));
 });
 
 app.post('/setup/custom', async (c) => {

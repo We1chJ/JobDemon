@@ -13,6 +13,7 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
     { key: 'phone', label: 'Phone', type: 'tel', auto: 'tel', placeholder: '+1 555 010 0000' },
     { key: 'location_city', label: 'City', auto: 'address-level2', placeholder: 'San Francisco, CA' },
     { key: 'country', label: 'Country', auto: 'country-name', placeholder: 'United States' },
+    { key: 'mailing_address', label: 'Mailing address', auto: 'street-address', placeholder: '123 Main St, Apt 4, Boston, MA 02115', wide: true },
   ] },
   { title: 'Links', fields: [
     { key: 'linkedin_url', label: 'LinkedIn', type: 'url', placeholder: 'https://www.linkedin.com/in/…' },
@@ -23,6 +24,12 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
     { key: 'years_of_experience', label: 'Years of experience', type: 'number', placeholder: '4' },
     { key: 'how_did_you_hear', label: 'How did you hear about us?', placeholder: 'Company website' },
   ] },
+];
+
+/** Every profile field the bot can map a form question to, including the ones derived from the lists. */
+export const PROFILE_KEYS = [
+  ...FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key)),
+  'full_name', 'current_company', 'current_title', 'school', 'degree', 'discipline', 'graduation_year',
 ];
 
 export interface Job { company: string; title: string; start: string; end: string; highlights: string[] }
@@ -80,6 +87,9 @@ export function fromForm(b: Body, existing: Profile): Profile {
     if (e.school || e.degree) schools.push(e);
   }
 
+  // Odd dashes from PDFs (e.g. U+2212 in phone numbers) become a plain hyphen.
+  for (const k of Object.keys(fields)) fields[k] = String(fields[k] ?? '').replace(/[\u2010-\u2015\u2212]/g, '-');
+
   // Derived single-value fields that application forms ask for.
   fields.full_name = [fields.first_name, fields.last_name].filter(Boolean).join(' ');
   fields.current_company = jobs[0]?.company ?? '';
@@ -90,6 +100,7 @@ export function fromForm(b: Body, existing: Profile): Profile {
   fields.graduation_year = schools[0]?.year ?? '';
 
   return {
+    ...existing, // keeps other sections, e.g. the cover-letter template
     fields,
     facts: {
       ...(existing.facts ?? {}),

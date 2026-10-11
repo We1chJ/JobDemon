@@ -3,7 +3,7 @@ import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 export type AppStatus =
   | 'queued'
   | 'in_progress'
-  | 'ready_to_submit' // dry-run finished: form filled, waiting for human approval
+  | 'ready_to_submit' // form filled and left open; the applicant submits it
   | 'applied'
   | 'human_review'
   | 'duplicate';
@@ -18,8 +18,6 @@ export const application = sqliteTable('application', {
   reason: text('reason'), // why it went to human review
   confidence: real('confidence'),
   step: integer('step').notNull().default(0),
-  live: integer('live', { mode: 'boolean' }).notNull().default(false), // per-application submit approval
-  submitClickedAt: text('submit_clicked_at'), // set BEFORE clicking submit; guards against double-submit
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -45,6 +43,19 @@ export const answerBank = sqliteTable('answer_bank', {
   id: text('id').primaryKey(),
   question: text('question').notNull(),
   answer: text('answer').notNull(),
+});
+
+/** Application questions the bot couldn't answer. Answer them on the Setup page and they're remembered. */
+export const question = sqliteTable('question', {
+  key: text('key').primaryKey(), // normalised label
+  label: text('label').notNull(),
+  options: text('options').notNull().default('[]'), // JSON array of choices seen on the form
+  required: integer('required', { mode: 'boolean' }).notNull().default(false),
+  status: text('status').$type<'new' | 'ignored'>().notNull().default('new'),
+  company: text('company'),
+  url: text('url'),
+  seen: integer('seen').notNull().default(1),
+  createdAt: text('created_at').notNull(),
 });
 
 export const generation = sqliteTable('generation', {

@@ -5,7 +5,7 @@ import { db, schema, now } from './db/index.js';
 export function normalizeUrl(raw: string) {
   const u = new URL(raw.trim());
   u.hash = '';
-  for (const k of [...u.searchParams.keys()]) if (/^(utm_|gh_src|ref$|source$)/i.test(k)) u.searchParams.delete(k);
+  for (const k of [...u.searchParams.keys()]) if (/^(utm_|gh_src$|ref$|source$|fbclid$|gclid$|mc_[ce]id$)/i.test(k)) u.searchParams.delete(k);
   return u.toString();
 }
 

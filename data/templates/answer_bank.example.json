@@ -6,6 +6,7 @@
   { "id": "notice_period", "question": "What is your notice period / earliest start date?", "answer": "2 weeks" },
   { "id": "salary_expectation", "question": "What are your salary expectations?", "answer": "Open to discussing based on the full compensation package." },
   { "id": "over_18", "question": "Are you at least 18 years old?", "answer": "Yes" },
+  { "id": "non_compete", "question": "Do you have any employment restrictions, such as a non-compete agreement?", "answer": "No" },
   { "id": "privacy_consent", "question": "Do you consent to the privacy policy / processing of your application data?", "answer": "Yes" },
   { "id": "previously_employed", "question": "Have you previously worked for this company?", "answer": "No" }
 ]
