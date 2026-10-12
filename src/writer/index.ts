@@ -15,11 +15,11 @@ export interface Writer { generate(input: GenerateInput): Promise<string> }
 
 const SYSTEM = `You write job application text for the applicant described in PROFILE.
 Hard rules:
-- Use ONLY facts present in PROFILE. Never invent employers, titles, dates, numbers, skills, or degrees.
+- Use ONLY facts present in PROFILE (and REFERENCE MATERIAL when given). Never invent employers, titles, dates, numbers, skills, or degrees.
 - If the job asks for something the profile lacks, do not claim it; focus on what is true.
 - Plain text, first person, no placeholders like [Company], no markdown, no sign-off address block.`;
 
-function userPrompt(i: GenerateInput) {
+export function userPrompt(i: GenerateInput) {
   const t = i.profile.cover_letter;
   if (i.kind === 'cover_letter_body' && t) {
     return `PROFILE:\n${JSON.stringify({ fields: i.profile.fields, facts: i.profile.facts }, null, 1)}\n\nJOB DESCRIPTION (from the apply page):\n${i.jobDescription.slice(0, 8000)}\n\nTHE LETTER'S FIXED OPENING PARAGRAPH (already written, do not repeat it):\n${t.opening}\n\nTHE APPLICANT'S OWN EXAMPLE MIDDLE PARAGRAPHS (written for a different company; facts in them are true and may be used):\n${t.examples}\n\nTASK: Write the two middle paragraphs of the cover letter for the ${i.role} role at ${i.company}, 170-260 words in total, separated by one blank line.
@@ -31,7 +31,12 @@ function userPrompt(i: GenerateInput) {
   const task = i.kind === 'cover_letter'
     ? `Write a cover letter (180-280 words) for the ${i.role} role at ${i.company}. Connect 2-3 concrete profile facts to the job's needs. End with "${i.profile.fields.full_name ?? ''}".`
     : `Answer this application question in 80-180 words: "${i.question}". Role: ${i.role} at ${i.company}.`;
-  return `PROFILE:\n${JSON.stringify(i.profile, null, 1)}\n\nJOB DESCRIPTION (from the apply page):\n${i.jobDescription.slice(0, 8000)}\n\nTASK: ${task}${i.feedback ? `\n\nA previous draft was rejected: ${i.feedback}` : ''}`;
+  const { reference_docs: docs, cover_letter: _letter, ...profile } = i.profile;
+  // Open-ended answers may also draw on the reference material you pasted in Setup.
+  const refs = i.kind === 'paragraph' && docs?.length
+    ? `\n\nREFERENCE MATERIAL (written or provided by the applicant; facts in it are true and may be used):\n${docs.map((d) => `--- ${d.title || 'Untitled'} ---\n${d.text}`).join('\n\n').slice(0, 40000)}`
+    : '';
+  return `PROFILE:\n${JSON.stringify(profile, null, 1)}${refs}\n\nJOB DESCRIPTION (from the apply page):\n${i.jobDescription.slice(0, 8000)}\n\nTASK: ${task}${i.feedback ? `\n\nA previous draft was rejected: ${i.feedback}` : ''}`;
 }
 
 class OpenAIWriter implements Writer {

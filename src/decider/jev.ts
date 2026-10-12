@@ -1,6 +1,7 @@
 import { TypeSafeClient, choice, noul, score } from '@typesafe-ai/sdk';
 import { describe, isFileInput, isFillable, OPS, type ElementInfo, type Op } from '../types.js';
 import type { BankEntry } from '../profile.js';
+import { PROFILE_HINTS } from '../ui/profileForm.js';
 import { SPECIAL_KEYS, STAGES, type Decider, type NavContext, type Stage } from './types.js';
 
 const MAX_ELEMENTS = 80;
@@ -77,7 +78,7 @@ export class JevDecider implements Decider {
 
   async mapField(field: ElementInfo, profileKeys: string[]) {
     const criteria: Record<string, string> = { ...SPECIAL_KEYS };
-    for (const k of profileKeys) criteria[k] = `Profile field: ${k.replace(/_/g, ' ')}`;
+    for (const k of profileKeys) criteria[k] = PROFILE_HINTS[k] ?? `Profile field: ${k.replace(/_/g, ' ')}`;
     const r = await this.client.systemOne({
       state: { field: describe(field) },
       questions: {

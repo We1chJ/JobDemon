@@ -86,11 +86,15 @@ const OBSERVE_JS = String.raw`(() => {
       if (!el.name || seenRadio.has(el.name)) continue;
       seenRadio.add(el.name);
       const radios = [...document.querySelectorAll('input[type=radio][name="' + CSS.escape(el.name) + '"]')];
-      const group = el.closest('fieldset') || el.parentElement.parentElement;
-      const options = radios.map((r, k) => { r.setAttribute('data-jd-opt', idx + ':' + k); return clean((r.closest('label') || {}).innerText || r.value); });
+      const group = el.closest('[data-field-path]') || el.closest('fieldset') || el.parentElement.parentElement;
+      // Option text: its own <label for>, a wrapping <label>, or the value.
+      const optText = (r) => clean((r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]') || r.closest('label') || {}).innerText || r.getAttribute('aria-label') || r.value);
+      const options = radios.map((r, k) => { r.setAttribute('data-jd-opt', idx + ':' + k); return optText(r); });
       const checked = radios.find((r) => r.checked);
-      const legend = group && group.querySelector('legend');
-      out.push({ idx, key: 'radio:' + el.name, tag: 'radio', type: 'radio', label: clean(legend ? legend.innerText : labelOf(el)), value: checked ? clean((checked.closest('label') || {}).innerText || checked.value) : '', required: radios.some((r) => r.required), options });
+      // Question text: a legend, or the group's first label that isn't one of the option labels (Ashby).
+      const optionLabels = new Set(radios.map((r) => r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]')).filter(Boolean));
+      const head = group && (group.querySelector('legend') || [...group.querySelectorAll('label')].find((l) => !optionLabels.has(l) && !radios.some((r) => l.contains(r))));
+      out.push({ idx, key: 'radio:' + el.name, tag: 'radio', type: 'radio', label: clean(head ? head.innerText : labelOf(el)), value: checked ? optText(checked) : '', required: radios.some((r) => r.required), options });
       continue;
     }
     el.setAttribute('data-jd-idx', String(idx));
@@ -109,7 +113,9 @@ const OBSERVE_JS = String.raw`(() => {
         if (v) value = clean(v.innerText);
       }
     }
-    out.push({ idx, key: (el.name || el.id || label).slice(0, 120), tag, type, label, value, required, options });
+    // Checkboxes in a list often share one name: tell them apart by id or their own label.
+    const key = type === 'checkbox' && el.name ? el.name + ':' + (el.id || label) : (el.name || el.id || label);
+    out.push({ idx, key: key.slice(0, 120), tag, type, label, value, required, options });
   }
   return out;
 })()`;
@@ -140,9 +146,15 @@ export async function readJob(page: Page) {
 /** CAPTCHA / login walls go straight to the human queue. Invisible reCAPTCHA badges are ignored. */
 export async function detectBlocker(page: Page): Promise<string | null> {
   return (await page.evaluate(String.raw`(() => {
-    const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 30 && r.height > 30; };
+    // Only a CAPTCHA you can actually see counts. Invisible reCAPTCHA (e.g. Ashby) sits in hidden iframes.
+    const vis = (el) => {
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return r.width > 30 && r.height > 30 && cs.visibility !== 'hidden' && cs.display !== 'none' && Number(cs.opacity) > 0;
+    };
     for (const f of document.querySelectorAll('iframe')) {
       const src = f.src || '';
+      const r = f.getBoundingClientRect();
+      if (/recaptcha/.test(src) && Math.round(r.width) === 256 && Math.round(r.height) === 60) continue; // the corner badge
       if (/hcaptcha|challenges\.cloudflare|turnstile/.test(src) && vis(f)) return 'CAPTCHA on page';
       if (/recaptcha/.test(src) && !/size=invisible/.test(src) && vis(f)) return 'CAPTCHA on page';
     }

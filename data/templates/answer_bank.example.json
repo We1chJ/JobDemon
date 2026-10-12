@@ -1,5 +1,6 @@
 [
   { "id": "work_auth_us", "question": "Are you legally authorized to work in the United States?", "answer": "Yes" },
+  { "id": "us_person", "question": "Are you a U.S. Person (a U.S. citizen, lawful permanent resident, or protected individual under 8 U.S.C. 1324b(a)(3))?", "answer": "Yes" },
   { "id": "sponsorship", "question": "Will you now or in the future require visa sponsorship?", "answer": "No" },
   { "id": "relocate", "question": "Are you willing to relocate?", "answer": "Yes" },
   { "id": "remote_ok", "question": "Are you open to working in the office / hybrid?", "answer": "Yes" },
@@ -7,6 +8,8 @@
   { "id": "salary_expectation", "question": "What are your salary expectations?", "answer": "Open to discussing based on the full compensation package." },
   { "id": "over_18", "question": "Are you at least 18 years old?", "answer": "Yes" },
   { "id": "non_compete", "question": "Do you have any employment restrictions, such as a non-compete agreement?", "answer": "No" },
+  { "id": "met_at_event", "question": "Did you meet us at a career fair, conference or other event?", "answer": "No" },
+  { "id": "relatives_at_company", "question": "Do you have a spouse, partner or relatives who work for this company, or any other relationship with it?", "answer": "No" },
   { "id": "privacy_consent", "question": "Do you consent to the privacy policy / processing of your application data?", "answer": "Yes" },
   { "id": "previously_employed", "question": "Have you previously worked for this company?", "answer": "No" }
 ]

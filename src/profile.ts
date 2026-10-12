@@ -15,6 +15,8 @@ export interface Profile {
   fields: Record<string, string>;
   facts: Record<string, unknown>;
   cover_letter?: CoverLetterTemplate;
+  /** Documents you pasted in Setup; open-ended answers may draw on them. */
+  reference_docs?: { title: string; text: string }[];
 }
 export interface BankEntry { id: string; question: string; answer: string }
 

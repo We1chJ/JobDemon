@@ -12,7 +12,6 @@ import { observe, readJob, detectBlocker, findEmbeddedForm } from './observe.js'
 import type { Page } from 'playwright';
 import { fillField } from './fill.js';
 import { newApplicationContext, keepForm } from './browser.js';
-import { recordQuestion } from '../questions.js';
 import * as exec from './executor.js';
 
 type App = typeof schema.application.$inferSelect;
@@ -94,7 +93,7 @@ export async function runApplication(app: App, decider: Decider, writer: Writer)
         ...notes,
         ...(needs.length ? [`It needs your answer for: ${needs.slice(0, 4).map((n) => `"${n}"`).join(', ')}${needs.length > 4 ? ` and ${needs.length - 4} more` : ''}`] : []),
       ];
-      if (issues.length) return toReview(`Filled what it could. ${issues.join('. ')}. Finish it in the browser (and answer new questions in Setup so they're remembered).`);
+      if (issues.length) return toReview(`Filled what it could. ${issues.join('. ')}. Finish it in the browser.`);
       const empty = elements.filter((e) => e.required && !e.value && (isFillable(e) || isFileInput(e))).map((e) => `"${cleanLabel(e.label)}"`);
       const reason = empty.length
         ? `Filled in, but ${empty.length} required field${empty.length === 1 ? ' is' : 's are'} still empty: ${empty.slice(0, 3).join(', ')}. Fix ${empty.length === 1 ? 'it' : 'them'} in the browser, then submit.`
@@ -151,8 +150,6 @@ export async function runApplication(app: App, decider: Decider, writer: Writer)
           const r = await fillField(el, { ...deps, previousAnswer: above ? answers.get(above.key) ?? above.value : undefined });
           if (r.status === 'filled' && r.value) answers.set(el.key, r.value);
           logStep(app.id, step, `${action.op}:${r.status}`, el.label, r.detail, await shot('fill'));
-          // Unanswered questions are saved for the Setup page (required ones, and any question with choices).
-          if (r.status !== 'filled' && r.question && (r.question.required || r.question.options.length)) recordQuestion(r.question, info.company, app.url);
           if (r.status === 'escalate') needs.push(cleanLabel(el.label));
         } catch (err) {
           // One broken field never stops the rest of the form.

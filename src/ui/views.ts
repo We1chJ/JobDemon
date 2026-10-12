@@ -152,7 +152,7 @@ form.inline{display:inline}
 /* forms */
 label.lbl{display:block;font-weight:600;font-size:15px;margin-bottom:6px}
 .help{color:var(--muted);font-size:14px;margin:6px 0 0}
-textarea,input[type=file],input[type=text],input[type=email],input[type=tel],input[type=url],input[type=number]{width:100%;font:15px/1.5 var(--font);color:var(--fg);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px 14px;transition:border-color .15s,box-shadow .15s}
+textarea,select,input[type=file],input[type=text],input[type=email],input[type=tel],input[type=url],input[type=number],input[type=date],input[type=month]{width:100%;font:15px/1.5 var(--font);color:var(--fg);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px 14px;transition:border-color .15s,box-shadow .15s}
 textarea:focus,input:focus{outline:none;border-color:var(--action);box-shadow:var(--ring)}
 textarea{min-height:120px;resize:vertical}
 textarea.code{font:13px/1.55 var(--mono);min-height:360px;tab-size:2;background:var(--surface-2)}
@@ -261,7 +261,7 @@ a.check{color:var(--fg);text-decoration:none}a.check:hover{border-color:var(--bo
 .fld{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px;min-width:0}
 .fld.wide{grid-column:1/-1}
 .fld small{font-weight:400;color:var(--muted)}
-.fld input,.fld textarea{font-weight:400;min-height:44px;padding:10px 12px}
+.fld input,.fld textarea,.fld select{font-weight:400;min-height:44px;padding:10px 12px}
 .fld textarea{min-height:auto}
 .req{color:var(--danger)}
 h3.sub{margin:28px 0 12px;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
@@ -270,9 +270,6 @@ h3.sub small{display:block;text-transform:none;letter-spacing:0;font-weight:400;
 .rep{counter-increment:item;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px 16px;margin-bottom:12px;background:var(--surface-2)}
 .rep-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .rep-title{font-weight:600}.rep-title::after{content:" " counter(item)}
-.cq-row{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr) 44px;gap:10px;align-items:end;margin-bottom:10px}
-.cq-row .rep-remove{padding:0;width:44px}
-@media (max-width:640px){.cq-row{grid-template-columns:1fr 44px}.cq-row .fld:first-of-type{grid-column:1/-1}}
 .choice-other input[type=text]:focus{box-shadow:none}
 .choice-other input[type=text]{min-height:0;border-radius:0}
 
@@ -331,7 +328,7 @@ document.addEventListener('click', (e) => {
     if (first) first.focus();
   }
   const rm = e.target.closest('.rep-remove');
-  if (rm) rm.closest('.rep, .cq-row').remove();
+  if (rm) rm.closest('.rep').remove();
 });
 // Live status: while a run is going, refresh only the status area so typed links are never lost.
 (async function poll() {

@@ -13,9 +13,8 @@ import { saveProfile, type BankEntry, type Profile } from '../profile.js';
 import { processQueue } from '../run.js';
 import { layout, icon, badge, flash, ago, STATUS, OPS } from './views.js';
 import { SCREENING, OTHER, currentChoice, applyChoices } from './screening.js';
-import { FIELD_GROUPS, toForm, fromForm, customFromForm, type Job, type School } from './profileForm.js';
+import { FIELD_GROUPS, toForm, fromForm, type Job, type School } from './profileForm.js';
 import { draftFromResume } from '../resumeParse.js';
-import { newQuestions, removeQuestion, ignoreQuestion } from '../questions.js';
 import { isFormOpen, showForm, letterPath } from '../agent/browser.js';
 
 type App = typeof schema.application.$inferSelect;
@@ -62,7 +61,6 @@ app.get('/', (c) => {
   const setup = setupStatus();
   const missing = [!setup.resume && 'upload your resume', !setup.profile && 'replace the example profile', !setup.bank && 'review the example answers'].filter(Boolean);
   const queued = count('queued');
-  const nq = pendingQuestions().length;
 
   const stat = (s: string, n: number) => {
     const m = STATUS[s];
@@ -75,7 +73,6 @@ app.get('/', (c) => {
 <p class="lede">The bot fills each form and leaves it open in its browser window. It never submits: you review each one and click Submit yourself.</p></div></div>
 ${flash(c.req.query('msg'))}
 
-${nq ? html`<div class="callout t-info" role="status">${icon('alert')}<div><b>${nq} new question${nq === 1 ? '' : 's'} from applications.</b> The bot couldn't answer ${nq === 1 ? 'it' : 'them'}. Answer once and every future application uses your answer. <a href="/setup#new-q">Answer now</a></div></div>` : ''}
 ${missing.length ? html`<div class="callout t-warn" role="status">${icon('alert')}<div><b>Finish setup before adding real links.</b> You still need to ${missing.join(', ')}. <a href="/setup">Go to Setup</a></div></div>` : ''}
 
 <section class="card card-pad" aria-labelledby="add-h">
@@ -229,13 +226,12 @@ async function parseIntoDraft(): Promise<string | null> {
     return (e as Error).message;
   }
 }
-/** New questions still waiting; an empty-profile-field question disappears once that field is filled. */
-const pendingQuestions = () => {
-  const fields = loadProfileFile().fields;
-  return newQuestions().filter((q) => !(q.key.startsWith('profile:') && fields[q.key.slice('profile:'.length)]));
-};
 const back = (msg: string, hash = '') => `/setup?msg=${encodeURIComponent(msg)}${hash}`;
 
+const refRow = (r: { title: string; text: string }) => html`<div class="rep"><div class="rep-head"><span class="rep-title">Document</span>${html`<button type="button" class="btn btn-ghost btn-sm rep-remove" aria-label="Remove this document">Remove</button>`}</div><div class="fgrid">
+<label class="fld wide"><span>Title</span><input type="text" name="ref_title" value="${r.title}" placeholder="e.g. Smart-glasses streaming project"></label>
+<label class="fld wide"><span>Text</span><textarea name="ref_text" rows="8" placeholder="Paste the document or notes here.">${r.text}</textarea></label>
+</div></div>`;
 const removeBtn = (what: string) =>
   html`<button type="button" class="btn btn-ghost btn-sm rep-remove" aria-label="Remove this ${what}">Remove</button>`;
 const jobRow = (j: Job) => html`<div class="rep"><div class="rep-head"><span class="rep-title">Job</span>${removeBtn('job')}</div><div class="fgrid">
@@ -249,12 +245,10 @@ const eduRow = (e: School) => html`<div class="rep"><div class="rep-head"><span 
 <label class="fld"><span>School</span><input type="text" name="edu_school" value="${e.school}" placeholder="State University"></label>
 <label class="fld"><span>Degree</span><input type="text" name="edu_degree" value="${e.degree}" placeholder="BS"></label>
 <label class="fld"><span>Field of study</span><input type="text" name="edu_discipline" value="${e.discipline}" placeholder="Computer Science"></label>
-<label class="fld"><span>Graduation year</span><input type="text" name="edu_year" value="${e.year}" placeholder="2021" inputmode="numeric"></label>
+<label class="fld"><span>Start date</span><input type="date" name="edu_start" value="${e.start.length === 7 ? `${e.start}-01` : e.start}"><small>Fills start-date questions.</small></label>
+<label class="fld"><span>End / graduation date</span><input type="date" name="edu_date" value="${e.date}"><input type="hidden" name="edu_year" value="${e.year}"><small>Fills end-date and graduation questions.</small></label>
+<label class="fld"><span>GPA</span><input type="text" name="edu_gpa" value="${e.gpa}" placeholder="3.8" inputmode="decimal"></label>
 </div></div>`;
-const cqRow = (q: BankEntry) => html`<div class="cq-row"><input type="hidden" name="cq_id" value="${q.id}">
-<label class="fld"><span>Question</span><input type="text" name="cq_question" value="${q.question}" placeholder="Are you willing to travel?"></label>
-<label class="fld"><span>Answer</span><input type="text" name="cq_answer" value="${q.answer}" placeholder="Yes, up to 25%"></label>
-<button type="button" class="btn btn-ghost rep-remove" aria-label="Remove this question">${icon('minus')}</button></div>`;
 
 app.get('/setup', (c) => {
   const st = setupStatus();
@@ -264,9 +258,8 @@ app.get('/setup', (c) => {
   const size = bytes < 1024 ? `${bytes} bytes` : bytes < 1048576 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
   // Don't pre-select the example answers: every choice should be a deliberate click.
   const bank = st.bank ? loadBankFile() : [];
-  const custom = loadBankFile().filter((b) => !SCREENING.some((q) => q.id === b.id));
   const draft = loadDraft();
-  const nqs = pendingQuestions();
+  const refs = loadProfileFile().reference_docs ?? [];
   const cl = loadProfileFile().cover_letter ?? { header: '', salutation: 'To the {company} Selection Committee,', opening: '', examples: '', closing: 'Sincerely,' };
   const pf = toForm(draft ?? loadProfileFile());
 
@@ -290,22 +283,6 @@ ${item(st.profile, 'Profile', 'Still the example', '#profile-card')}
 ${st.resume ? html`<form method="post" action="/setup/parse" style="margin-top:12px"><button class="btn btn-sm">${icon('zap')}Fill profile from current resume</button></form>` : ''}
 </section>
 
-${nqs.length ? html`<section class="card card-pad" id="new-q" aria-labelledby="nq-h" style="border-color:color-mix(in srgb,var(--info) 45%,var(--border))">
-<div class="card-head">${icon('alert')}<h2 id="nq-h">New questions from applications</h2><span class="help" style="margin:0 0 0 auto">${nqs.length} waiting</span></div>
-<p class="help" style="margin:0 0 8px">The bot met these on application forms and had no answer. Answer the ones you want remembered and save. Leave any blank to skip it for now.</p>
-<form method="post" action="/setup/questions">
-${nqs.map((q) => html`<fieldset class="q"><legend>${q.label}</legend>
-<p class="help q-help">${q.key.startsWith('profile:') ? 'Saved to your profile · ' : ''}${q.required ? 'Required' : 'Optional'} · seen ${q.seen === 1 ? 'once' : `${q.seen} times`}${q.company ? `, first at ${q.company}` : ''}</p>
-<input type="hidden" name="nq_key" value="${q.key}"><input type="hidden" name="nq_label" value="${q.label}">
-<div class="choices">
-${q.options.length ? html`${q.options.map((o) => html`<label class="choice"><input type="radio" name="nq_${q.key}" value="${o}">${icon('check', 'tick')}<span>${o}</span></label>`)}
-<label class="choice choice-other"><input type="radio" name="nq_${q.key}" value="${OTHER}">${icon('check', 'tick')}<span>Other:</span><input type="text" name="nq_${q.key}__text" aria-label="${q.label} (your own answer)"></label>`
-    : html`<label class="fld wide" style="flex:1"><span class="sr">Your answer</span><input type="text" name="nq_${q.key}__text" placeholder="Your answer, used word for word"></label>`}
-<button class="btn btn-ghost btn-sm" name="ignore" value="${q.key}" formnovalidate>Never ask</button>
-</div></fieldset>`)}
-<div class="row" style="margin-top:16px"><button class="btn btn-primary">${icon('check')}Save answers</button></div>
-</form></section>` : ''}
-
 <section class="card card-pad" id="screening-card" aria-labelledby="s-h">
 <div class="card-head"><span class="step-num">2</span><h2 id="s-h">Screening questions</h2><span class="help progress" style="margin:0 0 0 auto" aria-live="polite"></span></div>
 <p class="help" style="margin:0 0 8px">Click an answer for each. The bot uses these word for word whenever a form asks something similar.</p>
@@ -320,14 +297,7 @@ ${q.other ? html`<label class="choice choice-other"><input type="radio" name="${
   })}
 <div class="row" style="margin-top:16px"><button class="btn btn-primary">${icon('check')}Save answers</button></div>
 </form>
-<div class="adv" id="custom-card">
-<h3>Your own questions</h3>
-<p class="help" style="margin:4px 0 12px">For questions the list above doesn't cover. Answers are used word for word.</p>
-<form method="post" action="/setup/custom">
-<div id="cq-rows">${(custom.length ? custom : [{ id: '', question: '', answer: '' }]).map(cqRow)}</div>
-<template id="tpl-cq">${cqRow({ id: '', question: '', answer: '' })}</template>
-<div class="row"><button type="button" class="btn btn-sm" data-add="cq">${icon('plus')}Add question</button><button class="btn btn-sm btn-primary">${icon('check')}Save your questions</button></div>
-</form></div>
+
 </section>
 
 <section class="card card-pad" id="profile-card" aria-labelledby="p-h">
@@ -336,8 +306,10 @@ ${q.other ? html`<label class="choice choice-other"><input type="radio" name="${
 ${draft ? html`<div class="callout t-info" style="margin-top:14px" role="status">${icon('zap')}<div><b>Filled in from your resume. Nothing is saved yet.</b> Check every field, especially dates and links, then click <b>Save profile</b> at the bottom.
 <form method="post" action="/setup/draft/discard" class="inline"><button class="btn btn-ghost btn-sm">Discard draft</button></form></div></div>` : ''}
 <form method="post" action="/setup/profile">
-${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid">${g.fields.map((d) => html`<label class="fld${d.wide ? ' wide' : ''}"><span>${d.label}${d.required ? html` <span class="req" aria-hidden="true">*</span>` : ''}</span>
-<input type="${d.type ?? 'text'}" name="${d.key}" value="${pf.fields[d.key] ?? ''}" ${d.auto ? html`autocomplete="${d.auto}"` : ''} placeholder="${d.placeholder ?? ''}" ${d.required ? 'required' : ''} ${d.type === 'number' ? html`min="0" max="60"` : ''}></label>`)}</div>`)}
+${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}${g.help ? html`<small>${g.help}</small>` : ''}</h3><div class="fgrid">${g.fields.map((d) => html`<label class="fld${d.wide ? ' wide' : ''}"><span>${d.label}${d.required ? html` <span class="req" aria-hidden="true">*</span>` : ''}</span>
+${d.choices
+    ? html`<select name="${d.key}"><option value="">${g.title === 'Voluntary self-identification' ? 'Decline to answer' : 'Not set'}</option>${d.choices.map((o) => html`<option ${pf.fields[d.key] === o ? 'selected' : ''}>${o}</option>`)}</select>`
+    : html`<input type="${d.type ?? 'text'}" name="${d.key}" value="${pf.fields[d.key] ?? ''}" ${d.auto ? html`autocomplete="${d.auto}"` : ''} placeholder="${d.placeholder ?? ''}" ${d.required ? 'required' : ''} ${d.type === 'number' ? (d.key.endsWith('_year') ? html`min="1950" max="2100"` : html`min="0" max="60"`) : ''}>`}</label>`)}</div>`)}
 <h3 class="sub">About you</h3>
 <div class="fgrid">
 <label class="fld wide"><span>Summary</span><textarea name="summary" rows="3" placeholder="Two or three sentences: what you do, for how long, and what you're best at.">${pf.summary}</textarea></label>
@@ -349,15 +321,24 @@ ${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid"
 <button type="button" class="btn btn-sm" data-add="job">${icon('plus')}Add job</button>
 <h3 class="sub">Education <small>The first entry fills school, degree and graduation-year fields.</small></h3>
 <div id="edu-rows" class="reps">${pf.schools.map(eduRow)}</div>
-<template id="tpl-edu">${eduRow({ school: '', degree: '', discipline: '', year: '' })}</template>
+<template id="tpl-edu">${eduRow({ school: '', degree: '', discipline: '', year: '', date: '', start: '', gpa: '' })}</template>
 <button type="button" class="btn btn-sm" data-add="edu">${icon('plus')}Add education</button>
 <h3 class="sub">Interests <small>Optional</small></h3>
 <label class="fld wide"><span class="sr">Interests</span><textarea name="interests" rows="2" placeholder="What kind of work or products you care about.">${pf.interests}</textarea></label>
 <div class="sticky-save"><span class="help" style="margin:0">Saved to data/profile.json on this computer.</span><button class="btn btn-primary">${icon('check')}Save profile</button></div>
 </form></section>
 
+<section class="card card-pad" id="refs-card" aria-labelledby="rf-h">
+<div class="card-head"><span class="step-num">4</span><h2 id="rf-h">Reference material</h2></div>
+<p class="help" style="margin:0 0 12px">Paste anything that helps answer open-ended questions ("Why us?", "Describe a time...", "Tell us about a project"): project write-ups, a personal statement, notes. The bot may use facts from these, and only these plus your profile.</p>
+<form method="post" action="/setup/references">
+<div id="ref-rows" class="reps">${(refs.length ? refs : [{ title: '', text: '' }]).map(refRow)}</div>
+<template id="tpl-ref">${refRow({ title: '', text: '' })}</template>
+<div class="row"><button type="button" class="btn btn-sm" data-add="ref">${icon('plus')}Add document</button><button class="btn btn-sm btn-primary">${icon('check')}Save reference material</button></div>
+</form></section>
+
 <section class="card card-pad" id="letter-card" aria-labelledby="cl-h">
-<div class="card-head"><span class="step-num">4</span><h2 id="cl-h">Cover letter</h2></div>
+<div class="card-head"><span class="step-num">5</span><h2 id="cl-h">Cover letter</h2></div>
 <p class="help" style="margin:0">Every application gets this letter. Your opening paragraph is used word for word. The middle paragraphs are rewritten for each job from your examples below, connecting your experience to that job's description. Today's date is added automatically.</p>
 <form method="post" action="/setup/cover-letter">
 <div class="fgrid" style="margin-top:16px">
@@ -369,6 +350,15 @@ ${FIELD_GROUPS.map((g) => html`<h3 class="sub">${g.title}</h3><div class="fgrid"
 </div>
 <div class="row" style="margin-top:16px"><button class="btn btn-primary">${icon('check')}Save cover letter</button></div>
 </form></section>`));
+});
+
+app.post('/setup/references', async (c) => {
+  const b = await c.req.parseBody({ all: true });
+  const arr = (k: string) => ([] as unknown[]).concat(b[k] ?? []).map((v) => String(v).replace(/\r\n/g, '\n').trim());
+  const titles = arr('ref_title'), texts = arr('ref_text');
+  const reference_docs = texts.map((text, i) => ({ title: titles[i] ?? '', text })).filter((d) => d.text);
+  persist({ ...loadProfileFile(), reference_docs }, loadBankFile());
+  return c.redirect(back(`Saved ${reference_docs.length} reference document${reference_docs.length === 1 ? '' : 's'}.`, '#refs-card'));
 });
 
 app.post('/setup/cover-letter', async (c) => {
@@ -387,49 +377,6 @@ app.post('/setup/screening', async (c) => {
   if (missing.length) return c.redirect(back(`Error: nothing was saved because ${missing.length} question${missing.length === 1 ? ' is' : 's are'} unanswered, starting with "${missing[0]}"`, '#screening-card'));
   persist(loadProfileFile(), bank);
   return c.redirect(back(`Saved your ${SCREENING.length} screening answers.`, '#screening-card'));
-});
-
-app.post('/setup/questions', async (c) => {
-  const b = await c.req.parseBody({ all: true });
-  const one = (k: string) => { const v = b[k]; return String(Array.isArray(v) ? v[0] : v ?? '').trim(); };
-  if (b.ignore) {
-    ignoreQuestion(one('ignore'));
-    return c.redirect(back('Okay, the bot will not ask about that question again.', '#new-q'));
-  }
-  const keys = ([] as unknown[]).concat(b.nq_key ?? []).map(String);
-  const labels = ([] as unknown[]).concat(b.nq_label ?? []).map(String);
-  const bank = loadBankFile();
-  const profile = loadProfileFile();
-  let added = 0;
-  keys.forEach((key, i) => {
-    const choice = one(`nq_${key}`);
-    const answer = choice && choice !== OTHER ? choice : one(`nq_${key}__text`);
-    if (!answer) return;
-    if (key.startsWith('profile:')) {
-      // An empty profile field a form asked for (e.g. mailing address): fill it in on the profile.
-      profile.fields[key.slice('profile:'.length)] = answer;
-      removeQuestion(key);
-      added++;
-      return;
-    }
-    const base = labels[i].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'question';
-    let id = base;
-    for (let k = 2; bank.some((e) => e.id === id); k++) id = `${base}_${k}`;
-    bank.push({ id, question: labels[i], answer });
-    removeQuestion(key);
-    added++;
-  });
-  if (!added) return c.redirect(back('Error: nothing was saved because no answers were filled in.', '#new-q'));
-  persist(profile, bank);
-  return c.redirect(back(`Saved ${added} answer${added === 1 ? '' : 's'}. Future applications will use ${added === 1 ? 'it' : 'them'}. Click Retry on any application that needed ${added === 1 ? 'it' : 'them'}.`, '#custom-card'));
-});
-
-app.post('/setup/custom', async (c) => {
-  const r = customFromForm(await c.req.parseBody({ all: true }), loadBankFile());
-  if (r.error) return c.redirect(back(`Error: nothing was saved because ${r.error}.`, '#custom-card'));
-  persist(loadProfileFile(), r.bank);
-  const n = r.bank.filter((b) => !SCREENING.some((q) => q.id === b.id)).length;
-  return c.redirect(back(`Saved ${n} question${n === 1 ? '' : 's'} of your own.`, '#custom-card'));
 });
 
 app.post('/setup/profile', async (c) => {

@@ -15,7 +15,7 @@ interface Parsed {
   skills: string[];
   interests: string;
   work_history: { company: string; title: string; start: string; end: string; highlights: string[] }[];
-  education: { school: string; degree: string; discipline: string; year: string }[];
+  education: { school: string; degree: string; discipline: string; year: string; start: string; gpa: string }[];
 }
 
 const str = { type: 'string' } as const;
@@ -26,7 +26,7 @@ const SCHEMA = obj({
   skills: { type: 'array', items: str },
   interests: str,
   work_history: { type: 'array', items: obj({ company: str, title: str, start: str, end: str, highlights: { type: 'array', items: str } }) },
-  education: { type: 'array', items: obj({ school: str, degree: str, discipline: str, year: str }) },
+  education: { type: 'array', items: obj({ school: str, degree: str, discipline: str, year: str, start: str, gpa: str }) },
 });
 
 const PROMPT = (today: string) => `Extract the applicant's details from the resume text the user sends.
@@ -35,7 +35,7 @@ Rules:
 - Links: full URLs. Add "https://" if the resume shows a bare domain such as linkedin.com/in/x.
 - work_history: professional roles, most recent first. Dates as YYYY-MM when the month is known, else YYYY. Use "present" for current roles.
 - highlights: that role's bullet points, keeping the original wording and numbers.
-- education: most recent first. degree = the degree type (e.g. "BS", "MBA"); discipline = the field of study.
+- education: most recent first. degree = the degree type (e.g. "BS", "MBA"); discipline = the field of study; year = graduation year; start = start month as YYYY-MM (or ""); gpa = as written (e.g. "3.8/4.0"), or "".
 - summary: use the resume's own summary/objective if it has one; otherwise write at most 2 plain sentences using only facts from the resume.
 - years_of_experience: whole years from the earliest full-time professional role to ${today}, or "" if dates are missing. Do not count internships.
 - interests: only if the resume lists interests.`;
@@ -94,5 +94,8 @@ export async function draftFromResume(file: string, current: Profile, currentIsE
   body.edu_degree = edu.map((e) => e.degree);
   body.edu_discipline = edu.map((e) => e.discipline ?? '');
   body.edu_year = edu.map((e) => e.year);
+  body.edu_date = edu.map((e) => (e as { date?: string }).date ?? '');
+  body.edu_start = edu.map((e) => (e as { start?: string }).start ?? '');
+  body.edu_gpa = edu.map((e) => (e as { gpa?: string }).gpa ?? '');
   return fromForm(body, base);
 }

@@ -45,19 +45,6 @@ export const answerBank = sqliteTable('answer_bank', {
   answer: text('answer').notNull(),
 });
 
-/** Application questions the bot couldn't answer. Answer them on the Setup page and they're remembered. */
-export const question = sqliteTable('question', {
-  key: text('key').primaryKey(), // normalised label
-  label: text('label').notNull(),
-  options: text('options').notNull().default('[]'), // JSON array of choices seen on the form
-  required: integer('required', { mode: 'boolean' }).notNull().default(false),
-  status: text('status').$type<'new' | 'ignored'>().notNull().default('new'),
-  company: text('company'),
-  url: text('url'),
-  seen: integer('seen').notNull().default(1),
-  createdAt: text('created_at').notNull(),
-});
-
 export const generation = sqliteTable('generation', {
   key: text('key').primaryKey(),
   text: text('text').notNull(),

@@ -1,8 +1,7 @@
 // Form <-> profile.json mapping for the Setup page. Unknown keys already in the file are preserved.
-import type { BankEntry, Profile } from '../profile.js';
-import { SCREENING } from './screening.js';
+import type { Profile } from '../profile.js';
 
-export interface FieldDef { key: string; label: string; type?: string; auto?: string; placeholder?: string; required?: boolean; wide?: boolean }
+export interface FieldDef { key: string; label: string; type?: string; auto?: string; placeholder?: string; required?: boolean; wide?: boolean; choices?: string[] }
 
 export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[] = [
   { title: 'Contact', fields: [
@@ -11,14 +10,37 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
     { key: 'preferred_name', label: 'Preferred name', auto: 'nickname', placeholder: 'Optional' },
     { key: 'email', label: 'Email', type: 'email', auto: 'email', required: true },
     { key: 'phone', label: 'Phone', type: 'tel', auto: 'tel', placeholder: '+1 555 010 0000' },
-    { key: 'location_city', label: 'City', auto: 'address-level2', placeholder: 'San Francisco, CA' },
+    { key: 'location_city', label: 'Current location', placeholder: 'Boston, MA' },
+  ] },
+  { title: 'Mailing address', help: 'Forms asking for one full address get these joined together.', fields: [
+    { key: 'address_street', label: 'Street address', auto: 'street-address', placeholder: '123 Main St, Apt 4', wide: true },
+    { key: 'address_city', label: 'City', auto: 'address-level2', placeholder: 'Boston' },
+    { key: 'address_state', label: 'State', auto: 'address-level1', placeholder: 'MA' },
     { key: 'country', label: 'Country', auto: 'country-name', placeholder: 'United States' },
-    { key: 'mailing_address', label: 'Mailing address', auto: 'street-address', placeholder: '123 Main St, Apt 4, Boston, MA 02115', wide: true },
   ] },
   { title: 'Links', fields: [
     { key: 'linkedin_url', label: 'LinkedIn', type: 'url', placeholder: 'https://www.linkedin.com/in/…' },
     { key: 'github_url', label: 'GitHub', type: 'url', placeholder: 'https://github.com/…' },
     { key: 'website_url', label: 'Website / portfolio', type: 'url', placeholder: 'https://…' },
+  ] },
+  { title: 'Voluntary self-identification', help: 'Used only for optional demographic questions. Leave a field on "Decline to answer" and the bot picks the form\'s decline option.', fields: [
+    { key: 'gender', label: 'Gender', choices: ['Male', 'Female', 'Non-binary'] },
+    { key: 'pronouns', label: 'Personal pronouns', choices: ['He/him', 'She/her', 'They/them'] },
+    { key: 'veteran_status', label: 'Veteran status', choices: ['No, I am not a protected veteran', 'Yes, I am a protected veteran'] },
+    { key: 'disability_status', label: 'Disability', choices: ['No, I do not have a disability', 'Yes, I have a disability'] },
+    { key: 'race', label: 'Race', choices: ['Asian', 'White', 'Black or African American', 'Native Hawaiian or Other Pacific Islander', 'American Indian or Alaska Native', 'Two or More Races'] },
+    { key: 'ethnicity', label: 'Hispanic or Latino', choices: ['No, not Hispanic or Latino', 'Yes, Hispanic or Latino'] },
+  ] },
+  { title: 'High school', fields: [
+    { key: 'high_school_grad_year', label: 'High school graduation year', placeholder: '2024', type: 'number' },
+  ] },
+  { title: 'Test scores', help: 'Leave a score blank if you don\'t have one: the bot then picks the form\'s "no score" option.', fields: [
+    { key: 'test_score_type', label: 'Tests taken', choices: ['SAT', 'ACT', 'Both SAT and ACT', 'Neither'] },
+    { key: 'sat_score', label: 'Best SAT score', placeholder: 'e.g. 1520' },
+    { key: 'act_score', label: 'Best ACT score', placeholder: 'e.g. 34' },
+  ] },
+  { title: 'Work authorization', fields: [
+    { key: 'citizenship_status', label: 'Citizenship status', choices: ['U.S. citizen', 'U.S. lawful permanent resident (green card)', 'Asylee or refugee', 'Visa holder (e.g. F-1, OPT, H-1B)', 'Other'] },
   ] },
   { title: 'Other', fields: [
     { key: 'years_of_experience', label: 'Years of experience', type: 'number', placeholder: '4' },
@@ -29,11 +51,34 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
 /** Every profile field the bot can map a form question to, including the ones derived from the lists. */
 export const PROFILE_KEYS = [
   ...FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key)),
-  'full_name', 'current_company', 'current_title', 'school', 'degree', 'discipline', 'graduation_year',
+  'full_name', 'current_company', 'current_title', 'school', 'degree', 'discipline', 'gpa',
+  'school_start_month', 'school_start_year', 'school_start_date', 'graduation_year', 'graduation_month', 'graduation_date', 'mailing_address',
 ];
 
+/** Clearer descriptions for Jev where a field name alone is ambiguous. */
+export const PROFILE_HINTS: Record<string, string> = {
+  graduation_year: 'Year the applicant finishes university / college (education end date year, expected graduation year). Not high school.',
+  graduation_month: 'Month the applicant finishes university / college (education end date month, expected graduation month).',
+  graduation_date: 'Full date the applicant finishes university / college (education end date, expected graduation date).',
+  high_school_grad_year: 'Year the applicant graduated from high school (secondary school).',
+  mailing_address: 'Full postal / mailing / home address on one line.',
+  address_street: 'Street address line of the applicant\'s mailing / home address (house number and street).',
+  address_city: 'City of the applicant\'s mailing / home address.',
+  address_state: 'State or province the applicant lives in (state of residence; mailing / home address state).',
+  country: 'Country the applicant lives in (country of residence).',
+  location_city: 'Where the applicant is currently located, as "City, State" (e.g. a "Location" field).',
+  gpa: 'GPA / grade point average at university.',
+  school_start_month: 'Month the applicant started university (education start date month).',
+  school_start_year: 'Year the applicant started university (education start date year).',
+  school_start_date: 'Full date the applicant started university (education start date).',
+  test_score_type: 'Which standardized test scores the applicant has (SAT, ACT).',
+  sat_score: 'Best SAT score.',
+  act_score: 'Best ACT score.',
+  citizenship_status: 'Citizenship or immigration status (U.S. citizen, permanent resident, visa holder...).',
+};
+
 export interface Job { company: string; title: string; start: string; end: string; highlights: string[] }
-export interface School { school: string; degree: string; discipline: string; year: string }
+export interface School { school: string; degree: string; discipline: string; year: string; date: string; start: string; gpa: string }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -45,7 +90,7 @@ export function toForm(p: Profile) {
     highlights: Array.isArray(j.highlights) ? j.highlights.map(s) : [],
   }));
   const schools = (Array.isArray(f.education) ? f.education : []).map((e: Record<string, unknown>, i: number): School => ({
-    school: s(e.school), degree: s(e.degree), year: s(e.year),
+    school: s(e.school), degree: s(e.degree), year: s(e.year), date: s(e.date), start: s(e.start), gpa: s(e.gpa),
     // Older files kept the field of study only in fields.discipline.
     discipline: s(e.discipline) || (i === 0 ? s(p.fields?.discipline) : ''),
   }));
@@ -55,7 +100,7 @@ export function toForm(p: Profile) {
     skills: Array.isArray(f.skills) ? f.skills.map(s).join(', ') : s(f.skills),
     interests: s(f.interests),
     jobs: jobs.length ? jobs : [{ company: '', title: '', start: '', end: '', highlights: [] }],
-    schools: schools.length ? schools : [{ school: '', degree: '', discipline: '', year: '' }],
+    schools: schools.length ? schools : [{ school: '', degree: '', discipline: '', year: '', date: '', start: '', gpa: '' }],
   };
 }
 
@@ -83,7 +128,10 @@ export function fromForm(b: Body, existing: Profile): Profile {
   const m = list(b, 'edu_school').length;
   const schools: School[] = [];
   for (let i = 0; i < m; i++) {
-    const e = { school: list(b, 'edu_school')[i], degree: list(b, 'edu_degree')[i] ?? '', discipline: list(b, 'edu_discipline')[i] ?? '', year: list(b, 'edu_year')[i] ?? '' };
+    const date = list(b, 'edu_date')[i] ?? '';
+    // Graduation date (YYYY-MM-DD) wins; older entries only had a year.
+    const e = { school: list(b, 'edu_school')[i], degree: list(b, 'edu_degree')[i] ?? '', discipline: list(b, 'edu_discipline')[i] ?? '', year: date ? date.slice(0, 4) : list(b, 'edu_year')[i] ?? '', date,
+      start: list(b, 'edu_start')[i] ?? '', gpa: list(b, 'edu_gpa')[i] ?? '' };
     if (e.school || e.degree) schools.push(e);
   }
 
@@ -98,6 +146,21 @@ export function fromForm(b: Body, existing: Profile): Profile {
   fields.degree = schools[0]?.degree ?? '';
   fields.discipline = schools[0]?.discipline ?? '';
   fields.graduation_year = schools[0]?.year ?? '';
+  fields.gpa = schools[0]?.gpa ?? '';
+  // Start is a full date like the end date (older entries stored just YYYY-MM).
+  const s0 = schools[0]?.start ?? '';
+  const start = s0 ? new Date(`${s0.length === 7 ? `${s0}-01` : s0}T12:00:00`) : null;
+  fields.school_start_month = start ? start.toLocaleDateString('en-US', { month: 'long' }) : '';
+  fields.school_start_year = start ? String(start.getFullYear()) : '';
+  fields.school_start_date = start ? start.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  // One-line address from the parts (kept as typed if no street is set).
+  if (fields.address_street) {
+    const cityState = [fields.address_city, fields.address_state].filter(Boolean).join(', ');
+    fields.mailing_address = [fields.address_street, cityState].filter(Boolean).join(', ');
+  }
+  const grad = schools[0]?.date ? new Date(`${schools[0].date}T12:00:00`) : null;
+  fields.graduation_month = grad ? grad.toLocaleDateString('en-US', { month: 'long' }) : '';
+  fields.graduation_date = grad ? grad.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
 
   return {
     ...existing, // keeps other sections, e.g. the cover-letter template
@@ -111,21 +174,4 @@ export function fromForm(b: Body, existing: Profile): Profile {
       education: schools,
     },
   };
-}
-
-/** Custom (non-built-in) screening answers from the form rows. */
-export function customFromForm(b: Body, bank: BankEntry[]): { bank: BankEntry[]; error?: string } {
-  const qs = list(b, 'cq_question'), as = list(b, 'cq_answer'), ids = list(b, 'cq_id');
-  const builtIn = bank.filter((e) => SCREENING.some((q) => q.id === e.id));
-  const used = new Set(builtIn.map((e) => e.id));
-  const custom: BankEntry[] = [];
-  for (let i = 0; i < qs.length; i++) {
-    if (!qs[i] && !as[i]) continue;
-    if (!qs[i] || !as[i]) return { bank, error: `"${qs[i] || as[i]}" needs both a question and an answer` };
-    let id = ids[i] && !used.has(ids[i]) ? ids[i] : qs[i].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'custom';
-    for (let k = 2; used.has(id); k++) id = `${id.replace(/_\d+$/, '')}_${k}`;
-    used.add(id);
-    custom.push({ id, question: qs[i], answer: as[i] });
-  }
-  return { bank: [...builtIn, ...custom] };
 }

@@ -72,6 +72,8 @@ ${combo('country', 'Country', COUNTRIES, true)}
 <label><input type="radio" name="sponsor" value="yes" required> Yes</label><label><input type="radio" name="sponsor" value="no"> No</label></fieldset>
 <div><label for="why">Why do you want to work at Mockco? *</label><textarea id="why" name="why" required></textarea></div>
 ${combo('travel', 'Willing to travel?', ['Yes', 'No'])}
+<div><label><input type="checkbox" id="privacy" name="privacy" required> I have read and agree to the Privacy Statement *</label></div>
+<div><label for="conduct">Interview Code of Conduct *</label><select id="conduct" name="conduct" required><option value="">Select...</option><option>I do not agree</option><option>I agree</option></select></div>
 ${combo('noncompete', 'Do you have any employment restrictions such as a non-compete?', ['Yes', 'No'], true)}
 <div><label for="noncompete_explain">If so, please explain</label><input id="noncompete_explain" name="noncompete_explain"></div>
 ${extra}
@@ -82,12 +84,37 @@ ${extra}
 
 export function mockApp() {
   const app = new Hono();
-  app.get('/jobs/1', (c) => c.html(form('1')));
+  // Job 1 carries invisible reCAPTCHA like Ashby: hidden iframes that must NOT count as a CAPTCHA.
+  app.get('/jobs/1', (c) => c.html(form('1', [], '<iframe src="https://www.recaptcha.net/recaptcha/enterprise/anchor?k=x" width="256" height="60" style="visibility:hidden"></iframe><iframe src="https://www.recaptcha.net/recaptcha/enterprise/bframe?k=x" width="1200" height="150" style="visibility:hidden"></iframe>')));
   app.get('/jobs/4', (c) => c.html(form('4')));
   // 5: Ashby-style overview; the form is on a separate "Application" tab.
   app.get('/jobs/5', (c) => c.html(overview('5', '<nav role="tablist"><a role="tab" href="/jobs/5">Overview</a> <a role="tab" href="/jobs/5/application">Application</a></nav>', '<a href="/jobs/5/application">Apply for this Job</a>')));
   app.get('/jobs/5/application', (c) => c.html(form('5', [], `
 <div><h3>Autofill from resume</h3><p>Upload your resume here to autofill key application fields.</p><input id="autofill" type="file" tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0"><button type="button">Upload file</button></div>
+<div data-field-path="vet"><fieldset><label for="vet">Veteran Status</label>
+<div><input type="radio" id="vet-0" name="vet"><label for="vet-0">I identify as one or more of the classifications of protected veteran listed above</label></div>
+<div><input type="radio" id="vet-1" name="vet"><label for="vet-1">I am not a protected veteran</label></div>
+<div><input type="radio" id="vet-2" name="vet"><label for="vet-2">I decline to self-identify for protected veteran status</label></div></fieldset></div>
+<div><label for="startmonth">Start date month</label><select id="startmonth" name="startmonth"><option value="">Select...</option>${['January','February','March','April','May','June','July','August','September','October','November','December'].map((m) => `<option>${m}</option>`).join('')}</select></div>
+<div><label for="startyear">Start date year</label><input id="startyear" name="startyear"></div>
+<div><label for="gpa">GPA</label><input id="gpa" name="gpa"></div>
+<div><label for="school">School</label><select id="school" name="school"><option value="">Select...</option><option>Harvard University</option><option>Other</option></select></div>
+<div><label for="hs">When did you graduate from High School? *</label><input id="hs" name="hs" required></div>
+<div><label for="street">Street address</label><input id="street" name="street"></div>
+<div><label for="enddate">End date month</label><select id="enddate" name="enddate"><option value="">Select...</option>${['January','February','March','April','May','June','July','August','September','October','November','December'].map((m) => `<option>${m}</option>`).join('')}</select></div>
+<div data-field-path="fair"><label for="fair">Did you meet Mockco at a career fair?</label>
+<div><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" tabindex="-1" name="fair"></div></div>
+<div data-field-path="race"><fieldset><label for="race">Race</label>
+<div><input type="radio" id="race-0" name="race"><label for="race-0">Hispanic or Latino</label></div>
+<div><input type="radio" id="race-1" name="race"><label for="race-1">White (Not Hispanic or Latino)</label></div>
+<div><input type="radio" id="race-2" name="race"><label for="race-2">Asian (Not Hispanic or Latino)</label></div>
+<div><input type="radio" id="race-3" name="race"><label for="race-3">I decline to self-identify</label></div></fieldset></div>
+<div><label for="pronouns">Personal Pronouns *</label><select id="pronouns" name="pronouns" required><option value="">Select...</option><option>He/Him</option><option>She/Her</option><option>They/Them</option></select></div>
+<fieldset><legend>Please indicate which of the following programming languages you are proficient in</legend>
+<label><input type="checkbox" id="lang-java" name="lang"> Java</label><label><input type="checkbox" id="lang-ts" name="lang"> TypeScript</label><label><input type="checkbox" id="lang-cobol" name="lang"> COBOL</label></fieldset>
+<div><label for="act">Provide your best result on ACT</label><select id="act" name="act"><option value="">Select...</option><option>36</option><option>35</option><option>I don't have this score</option></select></div>
+<div data-field-path="usp"><label for="usp">Are you a U.S. Person, defined as a U.S. Citizen, a lawful permanent resident, or a protected individual under 8 U.S.C. 1324b(a)(3)?</label>
+<div><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" tabindex="-1" name="usp"></div></div>
 <div data-field-path="q18"><label for="q18">Are you at least 18 years old?</label>
 <div><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" tabindex="-1" name="q18"></div></div>
 <script>document.querySelectorAll('[data-option]').forEach((b) => b.onclick = () => {
