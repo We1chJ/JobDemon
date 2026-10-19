@@ -3,6 +3,7 @@ import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 export type AppStatus =
   | 'queued'
   | 'in_progress'
+  | 'waiting_for_you' // paused at a sign-in / create-account / verify-email page until you get past it
   | 'ready_to_submit' // form filled and left open; the applicant submits it
   | 'applied'
   | 'human_review'

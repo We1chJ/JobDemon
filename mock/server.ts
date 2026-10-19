@@ -1,11 +1,12 @@
 // Mock Greenhouse-style job board for local testing. Nothing here reaches a real employer.
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -27,6 +28,75 @@ document.querySelectorAll('.cb').forEach((cb) => {
 });
 </script>`;
 const COUNTRIES = ['United States +1', 'Afghanistan +93', 'Canada +1', 'India +91', 'United Kingdom +44'];
+
+function workdayWizard(job: string) {
+  const marks = Array.from({ length: 18 }, (_, i) => `<span data-automation-id="wd-mark-${i}"></span>`).join('');
+  return `<!doctype html><html><head><title>Job Application for ${ROLES[job]} at Mockco</title></head><body>${marks}
+<h1>${ROLES[job]}</h1><ol data-automation-id="progressBar"><li>My Information</li><li>Application Questions</li><li>Review</li></ol>
+<form method="post" action="/jobs/13">
+<section id="w1" data-automation-id="step1"><h2>My Information</h2>
+<div><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+<div><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+<div data-automation-id="formField-source"><label for="hear">How Did You Hear About Us? *</label>
+<div data-automation-id="multiSelectContainer" id="hearbox" style="position:relative"><input id="hear" type="text" placeholder="Search" autocomplete="off">
+<div id="hearcover" data-automation-id="promptIcon" style="position:absolute;inset:0"></div></div></div>
+<div data-automation-id="formField-phoneCode"><label for="pcode">Country Phone Code *</label>
+<div data-automation-id="multiSelectContainer" id="pcodebox" style="position:relative"><input id="pcode" type="text" placeholder="Search" autocomplete="off">
+<div id="pcodecover" data-automation-id="promptIcon" style="position:absolute;inset:0"></div></div></div>
+<div><label for="zip">Postal Code</label><input id="zip" name="zip"></div>
+<div><label for="ext">Phone Extension</label><input id="ext" name="ext"></div>
+<div style="display:none"><input type="checkbox" id="tnc"><label for="tnc">Terms and Conditions</label></div>
+${job === '14' ? '<div><label for="empid">Employee ID *</label><input id="empid" name="empid"></div>' : ''}
+<div id="err" role="alert" hidden></div></section>
+<section id="w2" data-automation-id="step2" hidden><h2>Application Questions</h2>
+<div><label for="why">Why do you want to work at Mockco? *</label><textarea id="why" name="why" required></textarea></div></section>
+<section id="w3" data-automation-id="step3" hidden><h2>Review</h2><p>Check your answers.</p></section>
+<footer data-automation-id="pageFooter"><button type="button" id="wnext" data-automation-id="pageFooterNextButton">Save and Continue</button>
+<button type="submit" id="wsubmit" data-automation-id="pageFooterSubmitButton" hidden>Submit</button></footer>
+</form>
+<script>
+// Workday-style pickers: options pop up OUTSIDE the field as promptOption divs (no role=option);
+// picking a leaf shows a "selectedItem" pill inside the field and clears the search box.
+let popup = null;
+const close = () => { if (popup) { popup.remove(); popup = null; } };
+const open = (input, box, items, onPick) => {
+  close(); popup = document.createElement('div'); popup.setAttribute('data-automation-id', 'activeListContainer');
+  popup.innerHTML = items.map((t) => '<div data-automation-id="promptOption" data-automation-label="' + t + '">' + t + '</div>').join('');
+  document.body.appendChild(popup);
+  popup.querySelectorAll('[data-automation-id=promptOption]').forEach((o) => o.onclick = () => onPick(o.dataset.automationLabel));
+};
+const pill = (box, input, text) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = text; box.insertBefore(p, input); input.value = ''; close(); };
+const tree = { 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram'], 'Other': ['Other', 'Friend or Colleague'] };
+const hear = document.getElementById('hear'), hearbox = document.getElementById('hearbox');
+// Like Workday, a wrapper covers the search box and catches the click: clicking it opens the list and focuses the box.
+const openHear = () => { hear.focus(); open(hear, hearbox, Object.keys(tree), (cat) => open(hear, hearbox, tree[cat], (leaf) => pill(hearbox, hear, leaf))); };
+hear.onclick = openHear;
+document.getElementById('hearcover').onclick = openHear;
+document.getElementById('pcodecover').onclick = () => { document.getElementById('pcode').focus(); close(); };
+const codes = ['United States of America (+1)', 'United States Minor Outlying Islands (+1)', 'United Kingdom (+44)', 'India (+91)'];
+const pcode = document.getElementById('pcode'), pcodebox = document.getElementById('pcodebox');
+pcode.onclick = () => close(); // shows nothing until you search
+pcode.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); open(pcode, pcodebox, codes.filter((c) => c.toLowerCase().includes(pcode.value.toLowerCase())), (c) => pill(pcodebox, pcode, c)); }
+  if (e.key === 'Escape') close();
+});
+hear.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+let step = 1;
+document.getElementById('wnext').onclick = () => {
+  const emp = document.getElementById('empid');
+  if (emp && !emp.value) { const e = document.getElementById('err'); e.textContent = 'Errors Found: Employee ID is required'; e.hidden = false; return; }
+  document.getElementById('w' + step).hidden = true; step++; document.getElementById('w' + step).hidden = false;
+  if (step === 3) { document.getElementById('wnext').hidden = true; document.getElementById('wsubmit').hidden = false; }
+};
+</script></body></html>`;
+}
+
+function signIn(job: string) {
+  return `<!doctype html><html><head><title>Job Application for ${ROLES[job]} at Mockco</title></head><body>
+<h1>Sign in to Mockco Careers</h1><p>Sign in or create an account to apply for ${ROLES[job]}.</p>
+<form method="post" action="/login?job=${job}"><label for="em">Email</label><input id="em" name="email" type="email">
+<label for="pw">Password</label><input id="pw" name="password" type="password"><button type="submit">Sign In</button></form></body></html>`;
+}
 
 function overview(job: string, tabs: string, applyLink: string) {
   return `<!doctype html><html><head><title>Job Application for ${ROLES[job]} at Mockco</title></head><body>
@@ -64,6 +134,7 @@ ${errors.length ? `<div class="errors" role="alert">${errors.map((e) => `<p>${e}
 <div><label for="phone">Phone</label><input id="phone" name="phone"></div>
 ${combo('country', 'Country', COUNTRIES, true)}
 <div><label for="resume">Resume/CV *</label><input id="resume" name="resume" type="file" required></div>
+<div><label for="transcript">Unofficial Transcript</label><input id="transcript" name="transcript" type="file"></div>
 <div><label for="cover_letter">Cover Letter</label><textarea id="cover_letter" name="cover_letter"></textarea></div>
 <div><label for="linkedin">LinkedIn Profile</label><input id="linkedin" name="linkedin"></div>
 <div><label for="auth">Are you legally authorized to work in the United States? *</label>
@@ -125,10 +196,30 @@ export function mockApp() {
   app.get('/jobs/6', (c) => c.html(multiStep()));
   // 7: "Apply now" opens the form in a new tab.
   app.get('/jobs/7', (c) => c.html(overview('7', '', '<a href="/jobs/7/application" target="_blank">Apply now</a>')));
-  app.get('/jobs/7/application', (c) => c.html(form('7')));
+  app.get('/jobs/7/application', (c) => c.html(form('7', [], `<ul><li class="application-question custom-question"><div class="application-label"><div class="text">Are you able to work from our Boulder office?</div></div>
+<div class="application-field"><ul><li><label><input type="radio" name="cards[q1]" value="Yes"><span>Yes</span></label></li><li><label><input type="radio" name="cards[q1]" value="No"><span>No</span></label></li></ul></div></li></ul>`)));
   // 8: company careers page embedding the form in an iframe.
   app.get('/jobs/8', (c) => c.html(`<html><head><title>Job Application for ${ROLES['8']} at Mockco</title></head><body><h1>Careers at Mockco</h1><iframe src="/embed/job_app?for=8" width="900" height="1400"></iframe></body></html>`));
   app.get('/embed/job_app', (c) => c.html(form(c.req.query('for') ?? '8')));
+  // 10 + 11: behind a sign-in wall (Workday / iCIMS style). Signing in once works for both.
+  for (const job of ['10', '11']) {
+    app.get(`/jobs/${job}`, (c) => (getCookie(c, 'mock_session') ? c.html(form(job)) : c.html(signIn(job))));
+  }
+  app.post('/login', async (c) => {
+    const body = await c.req.parseBody();
+    if (!body.email || !body.password) return c.html(signIn(c.req.query('job') ?? '10'));
+    setCookie(c, 'mock_session', '1', { path: '/' });
+    return c.redirect(`/jobs/${c.req.query('job') ?? '10'}`);
+  });
+  // 12: Workday-style: "Apply" opens a pop-up on the same page with start options; the form has a bot trap.
+  app.get('/jobs/12', (c) => c.html(overview('12', '', `<button type="button" id="apply12">Apply</button>
+<div id="modal" hidden role="dialog"><h2>Start Your Application</h2><a href="/jobs/12/application">Autofill with Resume</a> <a href="/jobs/12/application">Apply Manually</a></div>
+<script>document.getElementById('apply12').onclick = () => { document.getElementById('modal').hidden = false; };</script>`)));
+  app.get('/jobs/12/application', (c) => c.html(form('12', [], '<div><label for="trap">Enter website. This input is for robots only, do not enter if you\'re human.</label><input id="trap" name="trap"></div>')));
+  // 13: Workday-style wizard: one address, steps swap in place, one shared "Save and Continue" footer.
+  app.get('/jobs/13', (c) => c.html(workdayWizard('13')));
+  // 14: same wizard, but a required field the bot can't answer makes "Save and Continue" refuse to move on.
+  app.get('/jobs/14', (c) => c.html(workdayWizard('14')));
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));
   // Has a visible CAPTCHA widget: must go to the human queue.

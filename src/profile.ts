@@ -17,6 +17,8 @@ export interface Profile {
   cover_letter?: CoverLetterTemplate;
   /** Documents you pasted in Setup; open-ended answers may draw on them. */
   reference_docs?: { title: string; text: string }[];
+  /** Plain-language rules the AI reads with every question. Empty = the defaults. */
+  guidelines?: string[];
 }
 export interface BankEntry { id: string; question: string; answer: string }
 

@@ -9,6 +9,7 @@ process.env.DATA_DIR = dir;
 process.env.DECIDER ??= 'fake';
 process.env.WRITER ??= 'fake';
 process.env.HEADLESS = '1';
+process.env.SIGNIN_WAIT_MS = '60000';
 
 const { startMock, submissions, stats } = await import('./server.js');
 const { config } = await import('../src/config.js');
@@ -16,19 +17,20 @@ const { db, schema } = await import('../src/db/index.js');
 const { saveProfile } = await import('../src/profile.js');
 const { enqueue, normalizeUrl } = await import('../src/intake.js');
 const { processQueue } = await import('../src/run.js');
-const { openFormPage, isFormOpen, closeBrowser, newApplicationContext } = await import('../src/agent/browser.js');
+const { openFormPage, isFormOpen, closeBrowser, AppTabs } = await import('../src/agent/browser.js');
 const { eq } = await import('drizzle-orm');
 
 const server = startMock(4100);
 const tpl = (f: string) => JSON.parse(fs.readFileSync(path.join(config.templatesDir, f), 'utf8'));
 const OPENING = 'I care about two things: create and challenge. This paragraph never changes.';
 const baseProfile = tpl('profile.example.json');
-baseProfile.fields = { ...baseProfile.fields, veteran_status: 'No, I am not a protected veteran', graduation_month: 'May', race: 'Asian', ethnicity: 'No, not Hispanic or Latino', pronouns: 'He/him', school_start_month: 'August', school_start_year: '2024', gpa: '3.9', high_school_grad_year: '2020', address_street: '1 Main St' };
+baseProfile.fields = { ...baseProfile.fields, veteran_status: 'No, I am not a protected veteran', graduation_month: 'May', race: 'Asian', ethnicity: 'No, not Hispanic or Latino', pronouns: 'He/him', school_start_month: 'August', school_start_year: '2024', gpa: '3.9', high_school_grad_year: '2020', address_zip: '02115', address_street: '1 Main St' };
 saveProfile({ ...baseProfile, cover_letter: {
   header: 'Jane Doe\njane@example.com', salutation: 'To the {company} Selection Committee,', opening: OPENING,
   examples: 'My experience paragraph.\n\nWhy OtherCo paragraph.', closing: 'Sincerely,\n\nJane Doe',
 } }, tpl('answer_bank.example.json'));
 fs.writeFileSync(config.resumePath, '%PDF-1.4 fake resume');
+fs.writeFileSync(config.transcriptPath, '%PDF-1.4 fake transcript');
 
 let failed = 0;
 const check = (name: string, ok: boolean, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`); if (!ok) failed++; };
@@ -37,6 +39,10 @@ const u = (n: number, q = '') => `http://localhost:4100/jobs/${n}${q}`;
 
 try {
   enqueue([u(1), u(2), u(3), normalizeUrl(u(1, '?utm_source=x'))]);
+  const { startAddress } = await import('../src/sites/index.js');
+  const { portalName } = await import('../src/portals/index.js');
+  check('portal identified from the link first', portalName('https://acme.wd5.myworkdayjobs.com/x/job/1') === 'Workday' && portalName('https://job-boards.greenhouse.io/a/jobs/1') === 'Greenhouse' && portalName('https://jobs.ashbyhq.com/a/b') === 'Ashby' && portalName('http://localhost:4100/jobs/1') === null);
+  check('Ashby and Lever links go straight to the form', startAddress('https://jobs.ashbyhq.com/co/16529089-a048-4bc3-8456-3f197135e00b').endsWith('/application') && startAddress('https://jobs.lever.co/co/b18cc87d-fca2-485a-a0f2-ad6197db63f2').endsWith('/apply') && startAddress('https://jobs.lever.co/co/b18cc87d-fca2-485a-a0f2-ad6197db63f2/apply').endsWith('/apply'));
   check('intake dedups tracking params', db.select().from(schema.application).all().length === 3);
 
   await processQueue();
@@ -56,6 +62,7 @@ try {
   const val = (sel: string) => page.locator(sel).inputValue();
   check('structured fields mapped from profile', (await val('#first_name')) === 'Jane' && (await val('#email')) === 'jane@example.com' && (await val('#linkedin')) === 'https://www.linkedin.com/in/janedoe');
   check('answer bank used for select + radio', (await page.locator('#auth').evaluate((s: HTMLSelectElement) => s.options[s.selectedIndex].text)) === 'Yes' && (await page.locator('input[name=sponsor][value=no]').isChecked()));
+  check('transcript attached to the transcript field', (await page.locator('#transcript').evaluate((i: HTMLInputElement) => i.files?.[0]?.name)) === 'transcript.pdf');
   check('resume attached as-is', (await page.locator('#resume').evaluate((i: HTMLInputElement) => i.files?.[0]?.name)) === 'resume.pdf');
   const letter = await val('#cover_letter');
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -104,22 +111,76 @@ try {
   check('"Autofill from resume" upload is left alone', (await p5!.locator('#autofill').evaluate((i: HTMLInputElement) => i.files?.length ?? 0)) === 0);
   check('multi-step: fills step 1, clicks Next, fills step 2, stops at the review page', a6.status === 'ready_to_submit' && !!p6 && (await p6.locator('#why').inputValue()).length > 20 && await p6.locator('#s3').isVisible(), `${a6.status}: ${a6.reason}`);
   check('follows an "Apply now" link that opens a new tab', a7.status === 'ready_to_submit' && !!p7 && p7.url().endsWith('/jobs/7/application') && (await p7.locator('#email').inputValue()) === 'jane@example.com', `${a7.status}: ${a7.reason} @ ${p7?.url()}`);
+  check('Lever-style radio question read with its real wording', db.select().from(schema.stepLog).all().some((s) => s.target === 'Are you able to work from our Boulder office?'));
   check('opens a form embedded in an iframe', a8.status === 'ready_to_submit' && !!p8 && p8.url().includes('/embed/job_app') && (await p8.locator('#first_name').inputValue()) === 'Jane', `${a8.status}: ${a8.reason} @ ${p8?.url()}`);
   check('no form anywhere: says so instead of claiming it filled something', a9.status === 'human_review' && /couldn't find the application form/i.test(a9.reason ?? ''), `${a9.status}: ${a9.reason}`);
   check('still nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);
+
+  // Workday-style pop-up: "Apply" opens start options on the same page; the bot must move on to one of them.
+  enqueue([u(12)]);
+  await processQueue();
+  const a12 = get(u(12)), p12 = openFormPage(a12.id);
+  check('Workday-style Apply pop-up: picks a start option instead of re-clicking Apply', a12.status === 'ready_to_submit' && !!p12 && p12.url().endsWith('/jobs/12/application'), `${a12.status}: ${a12.reason} @ ${p12?.url()}`);
+  check('never fills a "robots only" trap field', !!p12 && (await p12.locator('#trap').inputValue()) === '');
+
+  // Workday-style wizard: same address and same "Save and Continue" button on every step.
+  enqueue([u(13)]);
+  await processQueue();
+  const a13 = get(u(13)), p13 = openFormPage(a13.id);
+  const logs13 = db.select().from(schema.stepLog).all().filter((s) => s.applicationId === a13.id);
+  check('Workday recognised from first-page markers and sent straight to the Workday flow', logs13.some((s) => s.detail === 'Portal: Workday (Workday flow)') && !logs13.some((s) => /Portal not recognised/.test(s.detail ?? '')));
+  check('Workday flow used its own rules, not Jev, to move between steps', logs13.some((s) => s.op === 'NEXT') && !logs13.some((s) => s.op === 'PAGE'));
+  check('wizard: fills each step, clicks "Save and Continue" through them, stops at Submit on Review', a13.status === 'ready_to_submit' && !!p13 && await p13.locator('#w3').isVisible() && (await p13.locator('#why').inputValue()).length > 20 && (await p13.locator('#first_name').inputValue()) === 'Jane', `${a13.status}: ${a13.reason}`);
+  const pillText = async (box: string) => (await p13!.locator(`#${box} [data-automation-id=selectedItem]`).allInnerTexts()).join(', ');
+  check('Workday: "How did you hear about us?" picked Other > Other from its pop-up list', !!p13 && (await pillText('hearbox')) === 'Other', await pillText('hearbox'));
+  check('Workday: "Country Phone Code" searched with Enter and picked', !!p13 && (await pillText('pcodebox')) === 'United States of America (+1)', await pillText('pcodebox'));
+  check('Workday: postal code filled, optional extension left empty', !!p13 && (await p13.locator('#zip').inputValue()) === '02115' && (await p13.locator('#ext').inputValue()) === '');
+  check('hidden leftover "Terms and Conditions" checkbox ignored', !db.select().from(schema.stepLog).all().some((s) => s.applicationId === a13.id && s.target === 'Terms and Conditions'));
+  enqueue([u(14)]);
+  await processQueue();
+  const a14 = get(u(14));
+  const nexts14 = db.select().from(schema.stepLog).all().filter((s) => s.applicationId === a14.id && s.op === 'NEXT').length;
+  check('step that won\'t advance: stops after one try and reports the page\'s error', a14.status === 'human_review' && /Employee ID is required/.test(a14.reason ?? '') && nexts14 === 1, `${a14.status} after ${nexts14} clicks: ${a14.reason}`);
+  check('wizard: Submit never clicked', stats.posts === 0 && submissions.length === 0);
+
+  // Sign-in walls: the bot waits for you, then takes over; the sign-in is remembered.
+  enqueue([u(10)]);
+  const run = processQueue();
+  for (let i = 0; i < 60 && get(u(10))?.status !== 'waiting_for_you'; i++) await new Promise((r) => setTimeout(r, 500));
+  const a10 = get(u(10));
+  check('pauses at the sign-in page and waits for you', a10.status === 'waiting_for_you' && isFormOpen(a10.id), `${a10.status}: ${a10.reason}`);
+  const sp = openFormPage(a10.id)!;
+  check('does not type into the sign-in form itself', (await sp.locator('#em').inputValue()) === '');
+  await sp.fill('#em', 'jane@example.com');
+  await sp.fill('#pw', 'test-only-password');
+  await Promise.all([sp.waitForURL('**/jobs/10', { timeout: 10000 }).catch(() => {}), sp.click('button[type=submit]')]);
+  await run;
+  const done10 = get(u(10)), p10 = openFormPage(done10.id);
+  check('takes over after you sign in and fills the form', done10.status === 'ready_to_submit' && !!p10 && (await p10.locator('#first_name').inputValue()) === 'Jane', `${done10.status}: ${done10.reason}`);
+  enqueue([u(11)]);
+  await processQueue();
+  const a11 = get(u(11));
+  const waited11 = db.select().from(schema.stepLog).all().some((s) => s.applicationId === a11.id && s.op === 'WAIT_FOR_YOU');
+  check('remembers the sign-in: the next job on that site skips the wait', a11.status === 'ready_to_submit' && !waited11, `${a11.status}: ${a11.reason}`);
+
+  // Running a single application leaves the rest of the queue alone.
+  enqueue([u(9, '?single=a'), u(9, '?single=b')]);
+  const [sa, sb] = [get(u(9, '?single=a')), get(u(9, '?single=b'))];
+  await processQueue([sa.id]);
+  check('"Run this one" runs only that application', get(u(9, '?single=a')).status !== 'queued' && get(u(9, '?single=b')).status === 'queued', `${get(u(9, '?single=a')).status} / ${get(u(9, '?single=b')).status}`);
 
   // Re-running does not touch filled applications.
   await processQueue();
   check('re-run leaves filled applications alone', get(u(1)).status === 'ready_to_submit' && submissions.length === 0);
 
   // Backstop: while the bot is working, even a forced form submission is refused.
-  const botCtx = await newApplicationContext();
-  const botPage = await botCtx.newPage();
+  const botTabs = await AppTabs.create();
+  const botPage = await botTabs.newPage();
   await botPage.goto(u(1));
   await botPage.evaluate(() => (document.querySelector('form') as HTMLFormElement).submit()).catch(() => {});
   await botPage.waitForTimeout(1000);
   check('bot browser refuses form submissions', stats.posts === 0, `${stats.posts} attempt(s) reached the server`);
-  await botCtx.close();
+  await botTabs.close();
 
   // Once handed over, YOU can submit the filled form in that same tab.
   await Promise.all([page.waitForLoadState('load').catch(() => {}), page.locator('button[type=submit]').click()]);

@@ -1,42 +1,80 @@
-// One shared browser. Filled-in application forms stay open in it so you can review and submit them yourself.
+// One shared browser that remembers sign-ins between runs (its profile lives in data/browser-profile).
+// Filled-in application forms stay open in it so you can review and submit them yourself.
 import fs from 'node:fs';
 import path from 'node:path';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page } from 'playwright';
 import { config } from '../config.js';
 
-let browser: Browser | null = null;
-const openForms = new Map<number, BrowserContext>(); // application id -> its filled-in form
+let context: BrowserContext | null = null;
+const openForms = new Map<number, AppTabs>(); // application id -> its tabs
+const guarded = new Set<Page>(); // tabs the bot is working in: form submissions are refused there
 
-export async function getBrowser() {
-  if (browser?.isConnected()) return browser;
-  browser = await chromium.launch({ headless: config.headless });
-  browser.on('disconnected', () => { browser = null; openForms.clear(); });
-  return browser;
-}
-
-/**
- * A browser context for one application. Hard backstop against submitting: while the bot works,
- * every form-submission navigation (any non-GET page load) is refused, so even a mistaken click
- * cannot send the form. The guard is lifted when the form is handed to you (keepForm).
- */
-export async function newApplicationContext() {
-  const ctx = await (await getBrowser()).newContext({ viewport: { width: 1280, height: 900 } });
-  await ctx.route('**/*', (route) => {
+async function getContext() {
+  if (context) return context;
+  const dir = path.join(config.dataDir, 'browser-profile');
+  fs.mkdirSync(dir, { recursive: true });
+  context = await chromium.launchPersistentContext(dir, { headless: config.headless, viewport: { width: 1280, height: 900 } });
+  // Hard backstop against submitting: in a tab the bot is working in, every form-submission page load
+  // (any non-GET navigation) is refused, so even a mistaken click cannot send an application.
+  await context.route('**/*', async (route) => {
     const req = route.request();
-    if (req.isNavigationRequest() && req.method() !== 'GET') return route.abort('blockedbyclient');
+    if (req.isNavigationRequest() && req.method() !== 'GET') {
+      const pg = req.frame().page();
+      const opener = await pg.opener().catch(() => null);
+      if (guarded.has(pg) || (opener && guarded.has(opener))) return route.abort('blockedbyclient');
+    }
     return route.continue();
   });
-  return ctx;
+  for (const p of context.pages()) await p.close().catch(() => {}); // the empty start-up tab
+  context.on('close', () => { context = null; openForms.clear(); guarded.clear(); });
+  return context;
+}
+
+/** The tabs belonging to one application (its own tab plus any it opened). */
+export class AppTabs {
+  private tabs: Page[] = [];
+  private listeners: ((p: Page) => void)[] = [];
+  private constructor(private ctx: BrowserContext) {}
+  static async create() { return new AppTabs(await getContext()); }
+
+  private track(p: Page) {
+    this.tabs.push(p);
+    guarded.add(p);
+    p.on('popup', (child) => { this.track(child); this.listeners.forEach((l) => l(child)); });
+    p.on('close', () => guarded.delete(p));
+  }
+  async newPage() { const p = await this.ctx.newPage(); this.track(p); return p; }
+  /** A link opened a new tab. */
+  onTab(cb: (p: Page) => void) { this.listeners.push(cb); }
+  waitForTab(timeout: number) {
+    return new Promise<Page | null>((resolve) => {
+      const t = setTimeout(() => resolve(null), timeout);
+      this.listeners.push((p) => { clearTimeout(t); resolve(p); });
+    });
+  }
+  pages() { return this.tabs.filter((p) => !p.isClosed()); }
+  /** Let the person use these tabs normally (sign in, submit). */
+  unguard() { this.tabs.forEach((p) => guarded.delete(p)); }
+  /** The bot is working again: refuse form submissions. */
+  guard() { this.pages().forEach((p) => guarded.add(p)); }
+  async close() { for (const p of this.pages()) await p.close().catch(() => {}); }
+}
+
+/** Show the tab to the person (e.g. while they sign in) without handing the form over yet. */
+export async function lendTabs(appId: number, tabs: AppTabs) {
+  if (openForms.get(appId) !== tabs) await openForms.get(appId)?.close();
+  openForms.set(appId, tabs);
+  tabs.unguard();
+  await tabs.pages().pop()?.bringToFront().catch(() => {});
 }
 
 /** Hand a form over to the applicant: the bot stops touching it and the submit guard is lifted. */
-export async function keepForm(appId: number, ctx: BrowserContext) {
-  await ctx.unrouteAll({ behavior: 'ignoreErrors' });
-  const page = ctx.pages().filter((p) => !p.isClosed()).pop(); // the tab the bot ended on
+export async function keepForm(appId: number, tabs: AppTabs) {
+  tabs.unguard();
+  const page = tabs.pages().pop(); // the tab the bot ended on
   if (page) await showLetterPanel(page, appId);
-  if (openForms.get(appId) !== ctx) await openForms.get(appId)?.close().catch(() => {});
-  openForms.set(appId, ctx);
-  ctx.on('close', () => { if (openForms.get(appId) === ctx) openForms.delete(appId); });
+  if (openForms.get(appId) !== tabs) await openForms.get(appId)?.close();
+  openForms.set(appId, tabs);
 }
 
 export const letterPath = (appId: number) => path.join(config.lettersDir, `${appId}-cover-letter.txt`);
@@ -82,7 +120,7 @@ async function showLetterPanel(page: Page, appId: number) {
 }
 
 export function openFormPage(appId: number) {
-  const page = openForms.get(appId)?.pages().filter((p) => !p.isClosed()).pop();
+  const page = openForms.get(appId)?.pages().pop();
   if (!page) openForms.delete(appId);
   return page ?? null;
 }
@@ -99,12 +137,12 @@ export const isFormOpen = (appId: number) => !!(openForms.has(appId) && openForm
 export const openFormCount = () => openForms.size;
 
 export async function closeBrowser() {
-  await browser?.close().catch(() => {});
-  browser = null;
+  await context?.close().catch(() => {});
+  context = null;
 }
 
 export async function waitForBrowserClose() {
-  if (!browser) return;
-  const b = browser;
-  await new Promise<void>((r) => b.once('disconnected', () => r()));
+  if (!context) return;
+  const c = context;
+  await new Promise<void>((r) => c.once('close', () => r()));
 }

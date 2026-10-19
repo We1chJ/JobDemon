@@ -11,6 +11,7 @@ export const config = {
   profilePath: path.join(dataDir, 'profile.json'),
   answerBankPath: path.join(dataDir, 'answer_bank.json'),
   resumePath: path.join(dataDir, process.env.RESUME_FILE ?? 'resume.pdf'),
+  transcriptPath: path.join(dataDir, 'transcript.pdf'),
   lettersDir: path.join(dataDir, 'letters'),
   tracesDir: path.join(dataDir, 'traces'),
 
@@ -19,6 +20,7 @@ export const config = {
   headless: process.env.HEADLESS === '1',
   concurrency: Number(process.env.CONCURRENCY ?? 1),
   maxSteps: Number(process.env.MAX_STEPS ?? 60),
+  signInWaitMs: Number(process.env.SIGNIN_WAIT_MS ?? 20 * 60 * 1000), // how long to wait for you at a sign-in page
 
   decider: process.env.DECIDER ?? 'jev', // 'jev' | 'fake'
   writer: process.env.WRITER ?? 'openai', // 'openai' | 'fake'

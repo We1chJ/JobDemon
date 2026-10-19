@@ -1,8 +1,6 @@
 import { TypeSafeClient, choice, noul, score } from '@typesafe-ai/sdk';
 import { describe, isFileInput, isFillable, OPS, type ElementInfo, type Op } from '../types.js';
-import type { BankEntry } from '../profile.js';
-import { PROFILE_HINTS } from '../ui/profileForm.js';
-import { SPECIAL_KEYS, STAGES, type Decider, type NavContext, type Stage } from './types.js';
+import { STAGES, type Decider, type NavContext, type Stage } from './types.js';
 
 const MAX_ELEMENTS = 80;
 
@@ -56,12 +54,14 @@ export class JevDecider implements Decider {
   }
 
   async navigate(ctx: NavContext) {
-    const clickables = ctx.elements.filter((e) => !isFillable(e) && !isFileInput(e)).slice(0, MAX_ELEMENTS);
+    // Never offer what was already clicked on this page (e.g. Workday's Apply opens a pop-up on the same page).
+    const clickables = ctx.elements.filter((e) => !isFillable(e) && !isFileInput(e) && !ctx.tried?.includes(e.label)).slice(0, MAX_ELEMENTS);
     const targets: Record<string, string> = { none: 'Nothing to click: no way forward, or the only way forward would submit the application.' };
     for (const e of clickables) targets[`e${e.idx}`] = describe(e);
     const r = await this.client.systemOne({
       state: {
         url: ctx.url,
+        ...(ctx.notes ? { portal_notes: ctx.notes } : {}),
         application_fields_filled_on_this_page: ctx.filledHere,
         application_fields_filled_so_far: ctx.filledTotal,
         fields_on_this_page: ctx.elements.filter((e) => isFillable(e) || isFileInput(e)).slice(0, 40).map(describe),
@@ -74,41 +74,6 @@ export class JevDecider implements Decider {
     });
     const t = r.answers.target.choice;
     return { stage: r.answers.stage.choice as Stage, target: t === 'none' ? null : Number(t.slice(1)), confidence: r.answers.stage.confidence };
-  }
-
-  async mapField(field: ElementInfo, profileKeys: string[]) {
-    const criteria: Record<string, string> = { ...SPECIAL_KEYS };
-    for (const k of profileKeys) criteria[k] = PROFILE_HINTS[k] ?? `Profile field: ${k.replace(/_/g, ' ')}`;
-    const r = await this.client.systemOne({
-      state: { field: describe(field) },
-      questions: {
-        key: choice('Which applicant data does this form field ask for?', criteria),
-        eeo: noul('Is this a voluntary EEO / demographic / self-identification question?'),
-      },
-    });
-    return { key: r.answers.key.choice, confidence: r.answers.key.confidence, eeo: r.answers.eeo.noul };
-  }
-
-  async pickBankEntry(field: ElementInfo, bank: BankEntry[]) {
-    if (!bank.length) return { id: null, confidence: 1 };
-    const criteria: Record<string, string> = { none: 'No stored answer fits this question.' };
-    for (const b of bank) criteria[b.id] = b.question;
-    const r = await this.client.systemOne({
-      state: { question: describe(field) },
-      questions: { entry: choice('Which stored question is this form field asking?', criteria) },
-    });
-    const id = r.answers.entry.choice;
-    return { id: id === 'none' ? null : id, confidence: r.answers.entry.confidence };
-  }
-
-  async pickOption(question: string, desired: string, options: string[]) {
-    const criteria: Record<string, string> = {};
-    options.forEach((o, i) => (criteria[`o${i}`] = o));
-    const r = await this.client.systemOne({
-      state: { question, intended_answer: desired },
-      questions: { option: choice('Which option best matches the intended answer?', criteria) },
-    });
-    return { index: Number(r.answers.option.choice.slice(1)), confidence: r.answers.option.confidence };
   }
 
   async isSubmitControl(el: ElementInfo, elements: ElementInfo[]) {

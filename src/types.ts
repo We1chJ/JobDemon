@@ -2,7 +2,7 @@
 export interface ElementInfo {
   idx: number;
   key: string; // stable identity across re-observations (name/id/label)
-  tag: string; // input | textarea | select | button | a | combobox
+  tag: string; // input | textarea | select | button | a | combobox | radio | checkgroup
   type: string; // text, email, file, checkbox, radio, submit...
   label: string;
   value: string;
@@ -25,7 +25,7 @@ export type Op = (typeof OPS)[number];
 
 export const isFileInput = (e: ElementInfo) => e.tag === 'input' && e.type === 'file';
 export const isFillable = (e: ElementInfo) =>
-  e.tag === 'textarea' || e.tag === 'select' || e.tag === 'combobox' || e.tag === 'radio' ||
+  e.tag === 'textarea' || e.tag === 'select' || e.tag === 'combobox' || e.tag === 'radio' || e.tag === 'checkgroup' ||
   (e.tag === 'input' && !['submit', 'button', 'hidden', 'reset', 'image'].includes(e.type));
 
 /** "Willing to travel? / Willing to travel?*" -> "Willing to travel?" */

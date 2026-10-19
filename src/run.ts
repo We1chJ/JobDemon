@@ -9,14 +9,16 @@ import { enqueueFile } from './intake.js';
 import { loadProfile } from './profile.js';
 import { makeDecider } from './decider/index.js';
 import { makeWriter } from './writer/index.js';
-import { runApplication } from './agent/loop.js';
+import { runApplication } from './portals/index.js';
 import { closeBrowser, openFormCount, waitForBrowserClose } from './agent/browser.js';
 
-export async function processQueue() {
+/** Run queued applications: all of them, or only the ones whose ids are given. */
+export async function processQueue(onlyIds?: number[]) {
   loadProfile(); // fail fast if the profile hasn't been imported
   // in_progress = interrupted mid-run; it is simply filled again.
   const apps = db.select().from(schema.application)
-    .where(inArray(schema.application.status, ['queued', 'in_progress'])).all();
+    .where(inArray(schema.application.status, ['queued', 'in_progress'])).all()
+    .filter((a) => !onlyIds || onlyIds.includes(a.id));
   if (!apps.length) return 0;
 
   const decider = makeDecider();

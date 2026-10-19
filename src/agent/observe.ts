@@ -57,6 +57,9 @@ const OBSERVE_JS = String.raw`(() => {
     const type = (el.getAttribute('type') || '').toLowerCase();
     if (type === 'hidden') continue;
     if (el.hasAttribute('data-jd-groupbtn')) continue; // part of a choice group, handled with its checkbox
+    // Bot traps ("This input is for robots only, do not enter if you're human"): never touch them.
+    // ("Leave blank if none" on a real question is NOT a trap: only "leave THIS field blank" wording counts.)
+    if (/for robots only|if you.?re (a )?human|leave this (field|input|box) (blank|empty)|honeypot/i.test(labelOf(el))) continue;
     if (groupOf.has(el)) {
       const btns = groupOf.get(el);
       const idx = out.length;
@@ -68,6 +71,13 @@ const OBSERVE_JS = String.raw`(() => {
       continue;
     }
     if (type !== 'file' && type !== 'radio' && type !== 'checkbox' && !visible(el)) continue;
+    // Hidden checkboxes/radios are fine when they're styled behind a visible label; otherwise they're
+    // leftovers (e.g. Workday's Create Account "Terms and Conditions" box, still in the page but hidden).
+    if ((type === 'checkbox' || type === 'radio') && !visible(el)) {
+      const lab = (el.id && document.querySelector('label[for="' + CSS.escape(el.id) + '"]')) || el.closest('label') || (el.parentElement && el.parentElement.querySelector('label'));
+      const btns = el.parentElement ? el.parentElement.querySelectorAll('button[aria-pressed]') : [];
+      if (!(lab && visible(lab)) && !btns.length) continue;
+    }
     if (el.disabled) continue;
     if (el.tagName === 'A') {
       const href = el.getAttribute('href') || '';
@@ -78,23 +88,34 @@ const OBSERVE_JS = String.raw`(() => {
         && (el.tabIndex === -1 || el.getAttribute('aria-hidden') === 'true')) continue;
     if ((el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') && /toggle flyout|^clear/i.test(el.getAttribute('aria-label') || '')) continue;
     const idx = out.length;
-    const isCombo = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list';
+    // Pick lists: standard comboboxes, plus search-style pickers (Workday: a "Search" box you type in and pick from).
+    const searchPicker = el.tagName === 'INPUT' && (type === 'text' || type === 'search' || !type) && /^search\b/i.test(el.placeholder || '')
+      && !!el.closest('[data-automation-id], form');
+    const isCombo = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list' || searchPicker;
     const role = el.getAttribute('role');
     const tag = isCombo ? 'combobox' : role === 'tab' ? 'tab' : el.tagName.toLowerCase();
     const required = el.required || el.getAttribute('aria-required') === 'true' || /\*\s*$/.test(labelOf(el));
-    if (type === 'radio') {
-      if (!el.name || seenRadio.has(el.name)) continue;
-      seenRadio.add(el.name);
-      const radios = [...document.querySelectorAll('input[type=radio][name="' + CSS.escape(el.name) + '"]')];
-      const group = el.closest('[data-field-path]') || el.closest('fieldset') || el.parentElement.parentElement;
+    // Radio groups, and checkbox lists that share one name ("select all that apply"), are one question each.
+    const grouped = type === 'radio' || (type === 'checkbox' && el.name && document.querySelectorAll('input[type=checkbox][name="' + CSS.escape(el.name) + '"]').length > 1);
+    if (grouped) {
+      if (!el.name || seenRadio.has(type + ':' + el.name)) continue;
+      seenRadio.add(type + ':' + el.name);
+      const optLabel = (r) => (r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]')) || r.closest('label');
+      const radios = [...document.querySelectorAll('input[type=' + type + '][name="' + CSS.escape(el.name) + '"]')]
+        .filter((r) => type === 'radio' || visible(r) || (optLabel(r) && visible(optLabel(r))));
+      if (!radios.length) continue;
+      const group = el.closest('[data-field-path]') || el.closest('fieldset') || el.closest('[class*="question"]') || el.parentElement.parentElement;
       // Option text: its own <label for>, a wrapping <label>, or the value.
       const optText = (r) => clean((r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]') || r.closest('label') || {}).innerText || r.getAttribute('aria-label') || r.value);
       const options = radios.map((r, k) => { r.setAttribute('data-jd-opt', idx + ':' + k); return optText(r); });
-      const checked = radios.find((r) => r.checked);
+      const checked = radios.filter((r) => r.checked);
       // Question text: a legend, or the group's first label that isn't one of the option labels (Ashby).
       const optionLabels = new Set(radios.map((r) => r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]')).filter(Boolean));
-      const head = group && (group.querySelector('legend') || [...group.querySelectorAll('label')].find((l) => !optionLabels.has(l) && !radios.some((r) => l.contains(r))));
-      out.push({ idx, key: 'radio:' + el.name, tag: 'radio', type: 'radio', label: clean(head ? head.innerText : labelOf(el)), value: checked ? optText(checked) : '', required: radios.some((r) => r.required), options });
+      const head = group && (group.querySelector('legend')
+        || [...group.querySelectorAll('label')].find((l) => !optionLabels.has(l) && !radios.some((r) => l.contains(r)))
+        // e.g. Lever: <div class="application-label"><div class="text">Question</div></div>
+        || [...group.querySelectorAll('[class*="label"]')].find((l) => !radios.some((r) => l.contains(r)) && clean(l.innerText)));
+      out.push({ idx, key: (type === 'radio' ? 'radio:' : 'check:') + el.name, tag: type === 'radio' ? 'radio' : 'checkgroup', type, label: clean(head ? head.innerText : labelOf(el)), value: checked.map(optText).join(', '), required: radios.some((r) => r.required), options });
       continue;
     }
     el.setAttribute('data-jd-idx', String(idx));
@@ -107,14 +128,18 @@ const OBSERVE_JS = String.raw`(() => {
     else if ('value' in el && tag !== 'button') value = clean(el.value);
     if (tag === 'combobox' && !value) {
       // Custom dropdowns clear their text box after a pick and show the choice elsewhere (react-select "single-value").
+      // Look only within this field: stop before reaching a container that holds another input.
       let p = el.parentElement;
       for (let i = 0; i < 5 && p && !value; i++, p = p.parentElement) {
-        const v = p.querySelector('[class*="single-value"],[class*="singleValue"]');
+        if ([...p.querySelectorAll('input, select, textarea')].some((x) => x !== el && x.type !== 'hidden' && x.tabIndex !== -1)) break;
+        const v = p.querySelector('[class*="single-value"],[class*="singleValue"],[data-automation-id*="selectedItem" i],[data-automation-id="promptSelectionLabel"]');
         if (v) value = clean(v.innerText);
       }
     }
     // Checkboxes in a list often share one name: tell them apart by id or their own label.
-    const key = type === 'checkbox' && el.name ? el.name + ':' + (el.id || label) : (el.name || el.id || label);
+    // Identity: name, then Workday's stable data-automation-id, then id, then label (two "If so, please explain" boxes share a label).
+    const aid = el.getAttribute('data-automation-id');
+    const key = type === 'checkbox' && el.name ? el.name + ':' + (el.id || label) : (el.name || (aid ? aid + ':' + label : '') || el.id || label);
     out.push({ idx, key: key.slice(0, 120), tag, type, label, value, required, options });
   }
   return out;
@@ -158,8 +183,15 @@ export async function detectBlocker(page: Page): Promise<string | null> {
       if (/hcaptcha|challenges\.cloudflare|turnstile/.test(src) && vis(f)) return 'CAPTCHA on page';
       if (/recaptcha/.test(src) && !/size=invisible/.test(src) && vis(f)) return 'CAPTCHA on page';
     }
-    const pw = [...document.querySelectorAll('input[type=password]')].find(vis);
+    // Password boxes are short (~20px tall), so they get their own visibility test.
+    const shown = (el) => { const r = el.getBoundingClientRect(), cs = getComputedStyle(el); return r.width > 30 && r.height > 8 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
+    const pw = [...document.querySelectorAll('input[type=password]')].find(shown);
     if (pw) return 'Login or account creation required';
+    // Verify-email screens: only when there is a visible box asking for the code itself
+    // (page text alone isn't enough: a job description may well say "check your email").
+    const codeBox = [...document.querySelectorAll('input:not([type=hidden])')].find((i) => shown(i) &&
+      /verif|one.?time|\botp\b|security code|access code|confirmation code|6.?digit/i.test([i.name, i.id, i.placeholder, i.getAttribute('autocomplete'), i.getAttribute('aria-label'), (i.labels && i.labels[0] ? i.labels[0].innerText : '')].join(' ')));
+    if (codeBox) return 'Email verification required';
     return null;
   })()`)) as string | null;
 }

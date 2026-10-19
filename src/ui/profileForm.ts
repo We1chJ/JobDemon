@@ -16,6 +16,7 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
     { key: 'address_street', label: 'Street address', auto: 'street-address', placeholder: '123 Main St, Apt 4', wide: true },
     { key: 'address_city', label: 'City', auto: 'address-level2', placeholder: 'Boston' },
     { key: 'address_state', label: 'State', auto: 'address-level1', placeholder: 'MA' },
+    { key: 'address_zip', label: 'ZIP / postal code', auto: 'postal-code', placeholder: '02115' },
     { key: 'country', label: 'Country', auto: 'country-name', placeholder: 'United States' },
   ] },
   { title: 'Links', fields: [
@@ -48,14 +49,7 @@ export const FIELD_GROUPS: { title: string; help?: string; fields: FieldDef[] }[
   ] },
 ];
 
-/** Every profile field the bot can map a form question to, including the ones derived from the lists. */
-export const PROFILE_KEYS = [
-  ...FIELD_GROUPS.flatMap((g) => g.fields.map((f) => f.key)),
-  'full_name', 'current_company', 'current_title', 'school', 'degree', 'discipline', 'gpa',
-  'school_start_month', 'school_start_year', 'school_start_date', 'graduation_year', 'graduation_month', 'graduation_date', 'mailing_address',
-];
-
-/** Clearer descriptions for Jev where a field name alone is ambiguous. */
+/** Clearer descriptions for the AI where a field name alone is ambiguous. */
 export const PROFILE_HINTS: Record<string, string> = {
   graduation_year: 'Year the applicant finishes university / college (education end date year, expected graduation year). Not high school.',
   graduation_month: 'Month the applicant finishes university / college (education end date month, expected graduation month).',
@@ -65,7 +59,9 @@ export const PROFILE_HINTS: Record<string, string> = {
   address_street: 'Street address line of the applicant\'s mailing / home address (house number and street).',
   address_city: 'City of the applicant\'s mailing / home address.',
   address_state: 'State or province the applicant lives in (state of residence; mailing / home address state).',
-  country: 'Country the applicant lives in (country of residence).',
+  address_zip: 'ZIP / postal code of the applicant\'s mailing / home address.',
+  phone: 'The applicant\'s phone number itself. NOT a phone extension and NOT a phone country code.',
+  country: 'Country the applicant lives in (country of residence). Also the answer for a phone number\'s country / country code picker.',
   location_city: 'Where the applicant is currently located, as "City, State" (e.g. a "Location" field).',
   gpa: 'GPA / grade point average at university.',
   school_start_month: 'Month the applicant started university (education start date month).',
@@ -155,7 +151,7 @@ export function fromForm(b: Body, existing: Profile): Profile {
   fields.school_start_date = start ? start.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
   // One-line address from the parts (kept as typed if no street is set).
   if (fields.address_street) {
-    const cityState = [fields.address_city, fields.address_state].filter(Boolean).join(', ');
+    const cityState = [fields.address_city, [fields.address_state, fields.address_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
     fields.mailing_address = [fields.address_street, cityState].filter(Boolean).join(', ');
   }
   const grad = schools[0]?.date ? new Date(`${schools[0].date}T12:00:00`) : null;
