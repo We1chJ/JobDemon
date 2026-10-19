@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -29,65 +29,276 @@ document.querySelectorAll('.cb').forEach((cb) => {
 </script>`;
 const COUNTRIES = ['United States +1', 'Afghanistan +93', 'Canada +1', 'India +91', 'United Kingdom +44'];
 
-function workdayWizard(job: string) {
-  const marks = Array.from({ length: 18 }, (_, i) => `<span data-automation-id="wd-mark-${i}"></span>`).join('');
-  return `<!doctype html><html><head><title>Job Application for ${ROLES[job]} at Mockco</title></head><body>${marks}
-<h1>${ROLES[job]}</h1><ol data-automation-id="progressBar"><li>My Information</li><li>Application Questions</li><li>Review</li></ol>
-<form method="post" action="/jobs/13">
-<section id="w1" data-automation-id="step1"><h2>My Information</h2>
-<div><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
-<div><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
-<div data-automation-id="formField-source"><label for="hear">How Did You Hear About Us? *</label>
-<div data-automation-id="multiSelectContainer" id="hearbox" style="position:relative"><input id="hear" type="text" placeholder="Search" autocomplete="off">
-<div id="hearcover" data-automation-id="promptIcon" style="position:absolute;inset:0"></div></div></div>
-<div data-automation-id="formField-phoneCode"><label for="pcode">Country Phone Code *</label>
-<div data-automation-id="multiSelectContainer" id="pcodebox" style="position:relative"><input id="pcode" type="text" placeholder="Search" autocomplete="off">
-<div id="pcodecover" data-automation-id="promptIcon" style="position:absolute;inset:0"></div></div></div>
-<div><label for="zip">Postal Code</label><input id="zip" name="zip"></div>
-<div><label for="ext">Phone Extension</label><input id="ext" name="ext"></div>
-<div style="display:none"><input type="checkbox" id="tnc"><label for="tnc">Terms and Conditions</label></div>
-${job === '14' ? '<div><label for="empid">Employee ID *</label><input id="empid" name="empid"></div>' : ''}
-<div id="err" role="alert" hidden></div></section>
-<section id="w2" data-automation-id="step2" hidden><h2>Application Questions</h2>
-<div><label for="why">Why do you want to work at Mockco? *</label><textarea id="why" name="why" required></textarea></div></section>
-<section id="w3" data-automation-id="step3" hidden><h2>Review</h2><p>Check your answers.</p></section>
+// Workday look-alike: widgets are built the way Workday builds them (formField containers, data-automation-id,
+// button dropdowns with a listbox, search lists with promptOption pop-ups, Month/Year spinbuttons, Add sections).
+const WD_MARKS = Array.from({ length: 18 }, (_, i) => `<span data-automation-id="wd-mark-${i}"></span>`).join('');
+const wdHead = (job: string) => `<!doctype html><html><head><title>${ROLES[job]} - Mockco Careers</title>
+<style>.wd-pop{position:absolute;background:#fff;border:1px solid #888;z-index:10}.wd-pop div,.wd-pop li{padding:4px 8px;cursor:pointer;list-style:none}
+[data-automation-id=errorMessage]{color:#b00}</style></head><body>${WD_MARKS}`;
+
+function workdayPosting(job: string) {
+  return `${wdHead(job)}<h1 data-automation-id="jobPostingHeader">${ROLES[job]}</h1>${JD}
+<a role="button" href="#" data-automation-id="adventureButton" id="apply">Apply</a>
+<div id="startDialog" hidden data-automation-id="startApplicationModal"><h2>Start Your Application</h2>
+<a role="button" href="/jobs/${job}/apply" data-automation-id="autofillWithResume">Autofill with Resume</a>
+<a role="button" href="/jobs/${job}/apply" data-automation-id="applyManually">Apply Manually</a></div>
+<script>document.getElementById('apply').onclick = (e) => { e.preventDefault(); document.getElementById('startDialog').hidden = false; };</script></body></html>`;
+}
+
+function workdaySignIn(job: string) {
+  return `${wdHead(job)}<div data-automation-id="signInContent"><h2>Sign In</h2>
+<form method="post" action="/wdlogin?job=${job}"><label for="em">Email Address</label><input id="em" name="email" type="email" data-automation-id="email">
+<label for="pw">Password</label><input id="pw" name="password" type="password" data-automation-id="password">
+<button type="submit" data-automation-id="signInSubmitButton">Sign In</button></form>
+<a href="#" data-automation-id="createAccountLink">Create Account</a></div></body></html>`;
+}
+
+const ff = (id: string, label: string, required: boolean, widget: string) =>
+  `<div data-automation-id="formField-${id}"><label for="${id}">${label}${required ? '<abbr>*</abbr>' : ''}</label>${widget}<div data-automation-id="errorMessage" hidden></div></div>`;
+const wdText = (id: string, label: string, required = false, area = false) =>
+  ff(id, label, required, area ? `<textarea id="${id}" ${required ? 'aria-required="true"' : ''}></textarea>` : `<input id="${id}" type="text" data-automation-id="${id}" ${required ? 'aria-required="true"' : ''}>`);
+const wdSelect = (id: string, label: string, options: string[], required = false) =>
+  ff(id, label, required, `<button type="button" id="${id}" aria-haspopup="listbox" data-automation-id="${id}" data-options="${options.join('|')}" ${required ? 'aria-required="true"' : ''}>Select One</button>`);
+const wdSearch = (id: string, label: string, required = false) =>
+  ff(id, label, required, `<div data-automation-id="multiselectInputContainer" class="wd-search" data-search="${id}" style="position:relative">
+<input id="${id}" type="text" placeholder="Search" data-automation-id="searchBox" ${required ? 'aria-required="true"' : ''}>
+<div data-automation-id="promptIcon" class="cover" style="position:absolute;inset:0"></div></div>`);
+const wdDate = (id: string, label: string, parts: string[], required = false) =>
+  // Like Workday: the real boxes are hidden under a drawn display ("MM/YYYY"), so they can't be clicked.
+  ff(id, label, required, `<div data-automation-id="dateInputWrapper" style="position:relative">${parts.map((p) =>
+    `<input data-automation-id="dateSection${p}-input" role="spinbutton" aria-label="${p}" style="position:absolute;left:-9999px;width:1px;height:1px" ${required ? 'aria-required="true"' : ''}>`).join('')}
+<div data-automation-id="dateSectionDisplay">${parts.map((p) => p === 'Year' ? 'YYYY' : p === 'Month' ? 'MM' : 'DD').join('/')}</div></div>`);
+const wdCheck = (id: string, label: string, required = false) =>
+  ff(id, '', required, `<input type="checkbox" id="${id}" ${required ? 'aria-required="true"' : ''}><label for="${id}">${label}</label>`);
+const wdRadio = (id: string, label: string, options: string[], required = false) =>
+  `<div data-automation-id="formField-${id}"><fieldset><legend>${label}${required ? '<abbr>*</abbr>' : ''}</legend>
+${options.map((o, k) => `<input type="radio" name="${id}" id="${id}-${k}" value="${o}" ${required ? 'aria-required="true"' : ''}><label for="${id}-${k}">${o}</label>`).join('')}</fieldset><div data-automation-id="errorMessage" hidden></div></div>`;
+
+const workEntry = (n: number) => `<div class="entry"><h4>Work Experience ${n}</h4><button type="button" class="del">Delete</button>
+${wdText(`jobTitle-${n}`, 'Job Title', true)}${wdText(`companyName-${n}`, 'Company', true)}
+${wdCheck(`currentlyWorkHere-${n}`, 'I currently work here')}${wdDate(`startDate-${n}`, 'From', ['Month', 'Year'], true)}</div>`;
+const eduEntry = (n: number) => `<div class="entry"><h4>Education ${n}</h4><button type="button" class="del">Delete</button>
+${wdText(`school-${n}`, 'School or University', true)}${wdSelect(`degree-${n}`, 'Degree', ['High School Diploma', 'BS Computer Science', 'MS Computer Science'], true)}</div>`;
+
+function workdayApply(job: string) {
+  const steps = ['My Information', 'My Experience', 'Application Questions', 'Voluntary Disclosures', 'Review'];
+  return `${wdHead(job)}<h1>${ROLES[job]}</h1>
+<ol data-automation-id="progressBar">${steps.map((s, i) => `<li data-step="${i}">${s}</li>`).join('')}</ol>
+<div data-automation-id="errorBanner" id="banner" role="alert" hidden></div>
+<section class="wd-step" data-name="My Information"><h2>My Information</h2>
+${wdSearch('source', 'How Did You Hear About Us?', true)}
+${wdText('legalNameSection_firstName', 'First Name', true)}${wdText('legalNameSection_lastName', 'Last Name', true)}
+${wdSelect('countryDropdown', 'Country', ['United States of America', 'Canada', 'India'], true)}
+${wdSearch('phoneCode', 'Country Phone Code', true)}${wdText('phoneNumber', 'Phone Number', true)}
+${wdText('postalCode', 'Postal Code')}${wdText('extension', 'Phone Extension')}
+${wdCheck('preferredCheckbox', 'I have a preferred name')}
+<div style="display:none">${wdCheck('tnc', 'Terms and Conditions')}</div>
+${job === '14' ? wdText('employeeId', 'Employee ID', true) : ''}</section>
+<section class="wd-step" data-name="My Experience" hidden><h2>My Experience</h2>
+<div data-automation-id="workExperienceSection"><h3>Work Experience</h3><div class="entries" data-kind="work"></div><button type="button" data-automation-id="Add" class="add">Add</button></div>
+<div data-automation-id="educationSection"><h3>Education</h3><div class="entries" data-kind="edu"></div><button type="button" data-automation-id="Add" class="add">Add</button></div>
+${wdSearch('skills', 'Type to Add Skills')}
+<div data-automation-id="resumeSection"><h3>Resume/CV</h3><input type="file" data-automation-id="file-upload-input-ref" id="resume" style="opacity:0;position:absolute;width:1px;height:1px">
+<div data-automation-id="file-upload-drop-zone">Drop file here or <button type="button" data-automation-id="select-files">Select file</button></div><div id="uploaded"></div></div></section>
+<section class="wd-step" data-name="Application Questions" hidden><h2>Application Questions</h2>
+${wdRadio('workAuth', 'Are you legally authorized to work in the United States?', ['Yes', 'No'], true)}
+${wdText('why', 'Why do you want to work at Mockco?', true, true)}</section>
+<section class="wd-step" data-name="Voluntary Disclosures" hidden><h2>Voluntary Disclosures</h2>
+${wdSelect('gender', 'Gender', ['Male', 'Female', 'I decline to self-identify'])}
+${wdCheck('termsAndConditions', 'I have read and consent to the Terms and Conditions', true)}</section>
+<section class="wd-step" data-name="Review" hidden><h2>Review</h2><p>Check your answers.</p></section>
 <footer data-automation-id="pageFooter"><button type="button" id="wnext" data-automation-id="pageFooterNextButton">Save and Continue</button>
-<button type="submit" id="wsubmit" data-automation-id="pageFooterSubmitButton" hidden>Submit</button></footer>
-</form>
+<button type="button" id="wsubmit" data-automation-id="pageFooterSubmitButton" hidden>Submit</button></footer>
 <script>
-// Workday-style pickers: options pop up OUTSIDE the field as promptOption divs (no role=option);
-// picking a leaf shows a "selectedItem" pill inside the field and clears the search box.
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 let popup = null;
-const close = () => { if (popup) { popup.remove(); popup = null; } };
-const open = (input, box, items, onPick) => {
-  close(); popup = document.createElement('div'); popup.setAttribute('data-automation-id', 'activeListContainer');
-  popup.innerHTML = items.map((t) => '<div data-automation-id="promptOption" data-automation-label="' + t + '">' + t + '</div>').join('');
+const closePop = () => { if (popup) { popup.remove(); popup = null; } };
+const openPop = (anchor, items, onPick, attr = 'data-automation-id="promptOption"', role = '') => {
+  closePop(); popup = document.createElement(role ? 'ul' : 'div'); popup.className = 'wd-pop';
+  if (role) popup.setAttribute('role', 'listbox'); else popup.setAttribute('data-automation-id', 'activeListContainer');
+  popup.innerHTML = items.map((t) => role ? '<li role="option">' + t + '</li>' : '<div ' + attr + ' data-automation-label="' + t + '">' + t + '</div>').join('');
+  const r = anchor.getBoundingClientRect(); popup.style.left = (r.left + scrollX) + 'px'; popup.style.top = (r.bottom + scrollY) + 'px';
   document.body.appendChild(popup);
-  popup.querySelectorAll('[data-automation-id=promptOption]').forEach((o) => o.onclick = () => onPick(o.dataset.automationLabel));
+  [...popup.children].forEach((o) => o.onclick = () => onPick(o.textContent));
 };
-const pill = (box, input, text) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = text; box.insertBefore(p, input); input.value = ''; close(); };
-const tree = { 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram'], 'Other': ['Other', 'Friend or Colleague'] };
-const hear = document.getElementById('hear'), hearbox = document.getElementById('hearbox');
-// Like Workday, a wrapper covers the search box and catches the click: clicking it opens the list and focuses the box.
-const openHear = () => { hear.focus(); open(hear, hearbox, Object.keys(tree), (cat) => open(hear, hearbox, tree[cat], (leaf) => pill(hearbox, hear, leaf))); };
-hear.onclick = openHear;
-document.getElementById('hearcover').onclick = openHear;
-document.getElementById('pcodecover').onclick = () => { document.getElementById('pcode').focus(); close(); };
-const codes = ['United States of America (+1)', 'United States Minor Outlying Islands (+1)', 'United Kingdom (+44)', 'India (+91)'];
-const pcode = document.getElementById('pcode'), pcodebox = document.getElementById('pcodebox');
-pcode.onclick = () => close(); // shows nothing until you search
-pcode.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); open(pcode, pcodebox, codes.filter((c) => c.toLowerCase().includes(pcode.value.toLowerCase())), (c) => pill(pcodebox, pcode, c)); }
-  if (e.key === 'Escape') close();
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
+// Button dropdowns.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[aria-haspopup=listbox]'); if (!b) return;
+  openPop(b, b.dataset.options.split('|'), (t) => { b.textContent = t; closePop(); }, '', 'listbox');
 });
-hear.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-let step = 1;
-document.getElementById('wnext').onclick = () => {
-  const emp = document.getElementById('empid');
-  if (emp && !emp.value) { const e = document.getElementById('err'); e.textContent = 'Errors Found: Employee ID is required'; e.hidden = false; return; }
-  document.getElementById('w' + step).hidden = true; step++; document.getElementById('w' + step).hidden = false;
-  if (step === 3) { document.getElementById('wnext').hidden = true; document.getElementById('wsubmit').hidden = false; }
+// Search lists: "source" is a two-level tree that opens on click; "phoneCode" shows nothing until you search.
+const tree = { 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram', 'Facebook'], 'Other': ['Other'] };
+const skillList = ['TypeScript', 'Node.js', 'PostgreSQL', 'AWS', 'Java', 'Leadership', 'Communication'];
+const codes = ['United States of America (+1)', 'United States Minor Outlying Islands (+1)', 'United Kingdom (+44)', 'India (+91)'];
+const pill = (box, t) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = t; box.insertBefore(p, box.firstChild); $('input', box).value = ''; closePop(); };
+$$('.wd-search').forEach((box) => {
+  const input = $('input', box), which = box.dataset.search;
+  const open = () => { input.focus(); if (which === 'source') openPop(box, Object.keys(tree), (cat) => openPop(box, tree[cat], (leaf) => pill(box, leaf)));
+    else if (which === 'skills') openPop(box, ['Leadership', 'Communication'], (t) => pill(box, t)); else closePop(); };
+  $('.cover', box).onclick = open;
+  input.onclick = open;
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return; e.preventDefault();
+    const list = which === 'phoneCode' ? codes : which === 'skills' ? skillList : Object.values(tree).flat();
+    openPop(box, list.filter((c) => c.toLowerCase().includes(input.value.toLowerCase())), (t) => pill(box, t));
+  });
+});
+// Repeating sections.
+const tpl = { work: ${JSON.stringify(workEntry(0))}, edu: ${JSON.stringify(eduEntry(0))} };
+$$('button.add').forEach((add) => add.onclick = () => {
+  const list = $('.entries', add.parentElement), n = list.children.length + 1;
+  const html = tpl[list.dataset.kind].replaceAll(' 0<', ' ' + n + '<').replaceAll('-0"', '-' + n + '"');
+  list.insertAdjacentHTML('beforeend', html);
+});
+document.addEventListener('click', (e) => { if (e.target.matches('.del')) e.target.closest('.entry').remove(); });
+$('#resume').onchange = () => { $('#uploaded').innerHTML = '<span data-automation-id="file-upload-successful">' + $('#resume').files[0].name + '</span>'; };
+// Steps: Save and Continue checks the required fields first, like Workday.
+let at = 0;
+const showStep = () => {
+  $$('.wd-step').forEach((s, i) => (s.hidden = i !== at));
+  $$('[data-step]').forEach((li, i) => li.toggleAttribute('data-current', i === at));
+  $$('[data-automation-id=progressBarActiveStep]').forEach((n) => n.removeAttribute('data-automation-id'));
+  $('[data-step="' + at + '"]').setAttribute('data-automation-id', 'progressBarActiveStep');
+  const last = at === $$('.wd-step').length - 1;
+  $('#wnext').hidden = last; $('#wsubmit').hidden = !last;
 };
+const empty = (f) => {
+  const req = f.querySelector('[aria-required=true]'); if (!req) return false;
+  if (f.querySelector('.wd-search')) return !f.querySelector('[data-automation-id=selectedItem]');
+  if (f.querySelector('button[aria-haspopup]')) return f.querySelector('button[aria-haspopup]').textContent === 'Select One';
+  if (f.querySelector('input[type=radio]')) return !f.querySelector('input[type=radio]:checked');
+  if (f.querySelector('input[type=checkbox]')) return !f.querySelector('input[type=checkbox]').checked;
+  return [...f.querySelectorAll('input, textarea')].some((i) => !i.value.trim());
+};
+$('#wnext').onclick = () => {
+  const step = $$('.wd-step')[at];
+  const bad = [...step.querySelectorAll('[data-automation-id^=formField-]')].filter((f) => f.offsetParent !== null && empty(f));
+  $$('[data-automation-id=errorMessage]').forEach((m) => (m.hidden = true));
+  if (bad.length) {
+    bad.forEach((f) => { const m = $('[data-automation-id=errorMessage]', f); m.textContent = 'The field ' + $('label, legend', f).textContent.replace('*', '') + ' is required and must have a value.'; m.hidden = false; });
+    $('#banner').textContent = 'Errors Found: ' + bad.length + ' error' + (bad.length > 1 ? 's' : ''); $('#banner').hidden = false; return;
+  }
+  $('#banner').hidden = true; at++; showStep();
+};
+showStep();
+</script></body></html>`;
+}
+
+// The same application built a different way: standard markup only (labels, ARIA roles and states),
+// none of Workday's own names. The flow must get through both versions unchanged.
+function altPosting(job: string) {
+  return `${wdHead(job)}<main><h1>${ROLES[job]}</h1>${JD}<button type="button" id="apply">Apply</button>
+<div id="start" role="dialog" aria-label="Start your application" hidden><h2>Start your application</h2><a role="button" href="/jobs/${job}/apply">Apply Manually</a></div></main>
+<script>document.getElementById('apply').onclick = () => { document.getElementById('start').hidden = false; };</script></body></html>`;
+}
+
+const aq = (id: string, label: string, required: boolean, control: string) =>
+  `<div class="q"><label id="${id}-l" for="${id}">${label}${required ? '<span aria-hidden="true"> *</span>' : ''}</label>${control}<p id="${id}-err" class="msg" hidden></p></div>`;
+const aText = (id: string, label: string, required = false, area = false) =>
+  aq(id, label, required, area ? `<textarea id="${id}" ${required ? 'required' : ''} aria-describedby="${id}-err"></textarea>` : `<input id="${id}" type="text" ${required ? 'required' : ''} aria-describedby="${id}-err">`);
+const aList = (id: string, label: string, options: string[], required = false) =>
+  aq(id, label, required, `<button type="button" id="${id}" class="lb" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="${id}-l" data-options="${options.join('|')}" ${required ? 'aria-required="true"' : ''} aria-describedby="${id}-err">Select an option</button>`);
+const aCombo = (id: string, label: string, required = false) =>
+  aq(id, label, required, `<div class="chips"></div><input id="${id}" class="cmb" role="combobox" aria-autocomplete="list" aria-expanded="false" ${required ? 'aria-required="true"' : ''} aria-describedby="${id}-err">`);
+const aCheck = (id: string, label: string, required = false) =>
+  `<div class="q"><div role="checkbox" class="box" id="${id}" tabindex="0" aria-checked="false" aria-labelledby="${id}-l" ${required ? 'aria-required="true"' : ''} aria-describedby="${id}-err"></div><span id="${id}-l">${label}${required ? ' *' : ''}</span><p id="${id}-err" class="msg" hidden></p></div>`;
+const aDate = (id: string, label: string) =>
+  `<div class="q"><label id="${id}-l">${label} *</label><span class="drawn">MM/YYYY</span>
+<input role="spinbutton" class="sp" aria-labelledby="${id}-l" aria-valuemin="1" aria-valuemax="12" aria-required="true" style="position:absolute;left:-9999px;width:1px;height:1px">
+<input role="spinbutton" class="sp" aria-labelledby="${id}-l" aria-valuemin="1900" aria-valuemax="2100" aria-required="true" style="position:absolute;left:-9999px;width:1px;height:1px"><p class="msg" hidden></p></div>`;
+const altJob = (n: number) => `<div class="item"><h4>Job ${n}</h4><button type="button" class="rm">Remove</button>
+${aText(`title-${n}`, 'Title', true)}${aText(`employer-${n}`, 'Employer', true)}${aCheck(`current-${n}`, 'I currently work here')}${aDate(`start-${n}`, 'Start date')}</div>`;
+const altSchool = (n: number) => `<div class="item"><h4>School ${n}</h4><button type="button" class="rm">Remove</button>
+${aText(`inst-${n}`, 'Institution', true)}${aList(`deg-${n}`, 'Degree', ['High School Diploma', 'BS Computer Science', 'MS Computer Science'], true)}</div>`;
+
+function altApply(job: string) {
+  const steps = ['My Information', 'My Experience', 'Application Questions', 'Voluntary Disclosures', 'Review'];
+  return `${wdHead(job)}<style>.box{display:inline-block;width:16px;height:16px;border:1px solid #333}.box[aria-checked=true]{background:#333}.q{margin:8px 0;position:relative}</style>
+<main><h1>${ROLES[job]}</h1><ol aria-label="Progress">${steps.map((s, i) => `<li>${s}</li>`).join('')}</ol>
+<div id="banner" role="alert" hidden></div>
+<section class="st"><h2>My Information</h2>
+${aCombo('heard', 'How did you hear about us?', true)}${aText('fname', 'First Name', true)}${aText('lname', 'Last Name', true)}
+${aList('ctry', 'Country', ['United States of America', 'Canada', 'India'], true)}${aCombo('dial', 'Country Phone Code', true)}
+${aText('tel', 'Phone Number', true)}${aText('zip', 'Postal Code')}${aText('ext', 'Phone Extension')}${aCheck('pref', 'I have a preferred name')}</section>
+<section class="st" hidden><h2>My Experience</h2>
+<section><h3>Work History</h3><div class="items" data-kind="job"></div><button type="button" class="more">Add another</button></section>
+<section><h3>Schools</h3><div class="items" data-kind="school"></div><button type="button" class="more">Add another</button></section>
+${aCombo('skills', 'Skills')}
+<div class="q"><label for="cv">Resume</label><input type="file" id="cv" style="display:none"><button type="button" onclick="document.getElementById('cv').click()">Choose file</button><span id="cvname"></span></div></section>
+<section class="st" hidden><h2>Application Questions</h2>
+<div class="q" role="radiogroup" aria-labelledby="auth-l" aria-required="true"><span id="auth-l">Are you legally authorized to work in the United States? *</span>
+<label><input type="radio" name="auth" value="Yes"> Yes</label><label><input type="radio" name="auth" value="No"> No</label></div>
+${aText('motive', 'Why do you want to work at Mockco?', true, true)}</section>
+<section class="st" hidden><h2>Voluntary Disclosures</h2>
+<div class="q"><label for="sex">Gender</label><select id="sex"><option value="">Select an option</option><option>Male</option><option>Female</option><option>Prefer not to say</option></select></div>
+${aCheck('agree', 'I agree to the privacy notice', true)}</section>
+<section class="st" hidden><h2>Review</h2><p>Check your answers.</p></section>
+<footer><button type="button" id="back">Back</button><button type="button" id="go">Next</button><button type="button" id="send" hidden>Submit application</button></footer></main>
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+let pop = null;
+const close = () => { if (pop) { pop.remove(); pop = null; } $$('[aria-expanded=true]').forEach((e) => e.setAttribute('aria-expanded', 'false')); };
+const show = (anchor, items, onPick) => {
+  close(); anchor.setAttribute('aria-expanded', 'true');
+  pop = document.createElement('ul'); pop.setAttribute('role', 'listbox'); pop.style.cssText = 'position:absolute;background:#fff;border:1px solid #888;z-index:9;list-style:none;padding:0';
+  pop.innerHTML = items.map((t) => '<li role="option" aria-selected="false" style="padding:4px 8px;cursor:pointer">' + t + '</li>').join('');
+  const r = anchor.getBoundingClientRect(); pop.style.left = (r.left + scrollX) + 'px'; pop.style.top = (r.bottom + scrollY) + 'px';
+  document.body.appendChild(pop); [...pop.children].forEach((o) => o.onclick = () => onPick(o.textContent));
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.lb'); if (b) show(b, b.dataset.options.split('|'), (t) => { b.textContent = t; close(); });
+  const c = e.target.closest('[role=checkbox]'); if (c) c.setAttribute('aria-checked', String(c.getAttribute('aria-checked') !== 'true'));
+  if (e.target.matches('.rm')) e.target.closest('.item').remove();
+});
+const tree = { 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram', 'Facebook'], 'Other': ['Other'] };
+const lists = { dial: ['United States of America (+1)', 'United States Minor Outlying Islands (+1)', 'India (+91)'], skills: ['TypeScript', 'Node.js', 'PostgreSQL', 'AWS', 'Java', 'Leadership'] };
+const chip = (input, t) => { const s = document.createElement('span'); s.setAttribute('role', 'option'); s.setAttribute('aria-selected', 'true'); s.textContent = t; input.parentElement.querySelector('.chips').appendChild(s); input.value = ''; close(); };
+$$('input.cmb').forEach((input) => {
+  const id = input.id;
+  input.addEventListener('click', () => {
+    if (id === 'heard') show(input, Object.keys(tree), (cat) => show(input, tree[cat], (leaf) => chip(input, leaf)));
+    else if (id === 'skills') show(input, ['Leadership', 'Communication'], (t) => chip(input, t));
+    else close();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return; e.preventDefault();
+    const all = id === 'heard' ? Object.values(tree).flat() : lists[id];
+    show(input, all.filter((x) => x.toLowerCase().includes(input.value.toLowerCase())), (t) => chip(input, t));
+  });
+});
+const tpl = { job: ${JSON.stringify(altJob(0))}, school: ${JSON.stringify(altSchool(0))} };
+$$('button.more').forEach((b) => b.onclick = () => {
+  const list = b.parentElement.querySelector('.items'), n = list.children.length + 1;
+  list.insertAdjacentHTML('beforeend', tpl[list.dataset.kind].replaceAll(' 0<', ' ' + n + '<').replaceAll('-0"', '-' + n + '"'));
+});
+$('#cv').onchange = () => { $('#cvname').textContent = $('#cv').files[0].name; };
+let at = 0;
+const render = () => {
+  $$('section.st').forEach((s, i) => (s.hidden = i !== at));
+  $$('ol li').forEach((li, i) => (i === at ? li.setAttribute('aria-current', 'step') : li.removeAttribute('aria-current')));
+  const last = at === $$('section.st').length - 1; $('#go').hidden = last; $('#send').hidden = !last;
+};
+const missing = (q) => {
+  const req = q.matches('[aria-required=true]') ? q : q.querySelector('[required], [aria-required=true]'); if (!req) return null;
+  if (req.matches('[role=radiogroup]')) return req.querySelector('input:checked') ? null : req;
+  if (req.matches('[role=checkbox]')) return req.getAttribute('aria-checked') === 'true' ? null : req;
+  if (req.matches('button.lb')) return req.textContent === 'Select an option' ? req : null;
+  if (req.matches('input.cmb')) return q.querySelector('.chips [role=option]') ? null : req;
+  if (req.matches('.sp')) return [...q.querySelectorAll('.sp')].every((s) => s.value) ? null : req;
+  return req.value.trim() ? null : req;
+};
+$('#go').onclick = () => {
+  const bad = $$('.q', $$('section.st')[at]).map(missing).filter(Boolean);
+  $$('[aria-invalid]').forEach((x) => x.removeAttribute('aria-invalid')); $$('.msg').forEach((m) => (m.hidden = true));
+  if (bad.length) {
+    bad.forEach((c) => { c.setAttribute('aria-invalid', 'true'); const m = document.getElementById(c.getAttribute('aria-describedby')) || c.closest('.q').querySelector('.msg'); if (m) { m.textContent = 'This field is required.'; m.hidden = false; } });
+    $('#banner').textContent = bad.length + ' required field' + (bad.length > 1 ? 's are' : ' is') + ' missing.'; $('#banner').hidden = false; return;
+  }
+  $('#banner').hidden = true; at++; render();
+};
+render();
 </script></body></html>`;
 }
 
@@ -216,10 +427,22 @@ export function mockApp() {
 <div id="modal" hidden role="dialog"><h2>Start Your Application</h2><a href="/jobs/12/application">Autofill with Resume</a> <a href="/jobs/12/application">Apply Manually</a></div>
 <script>document.getElementById('apply12').onclick = () => { document.getElementById('modal').hidden = false; };</script>`)));
   app.get('/jobs/12/application', (c) => c.html(form('12', [], '<div><label for="trap">Enter website. This input is for robots only, do not enter if you\'re human.</label><input id="trap" name="trap"></div>')));
-  // 13: Workday-style wizard: one address, steps swap in place, one shared "Save and Continue" footer.
-  app.get('/jobs/13', (c) => c.html(workdayWizard('13')));
-  // 14: same wizard, but a required field the bot can't answer makes "Save and Continue" refuse to move on.
-  app.get('/jobs/14', (c) => c.html(workdayWizard('14')));
+  // 13: Workday look-alike: posting -> Apply -> start options -> sign-in wall -> five-step application.
+  // 14: same, but a required field the bot can't answer makes "Save and Continue" refuse to move on.
+  for (const job of ['13', '14']) {
+    app.get(`/jobs/${job}`, (c) => c.html(workdayPosting(job)));
+    app.get(`/jobs/${job}/apply`, (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply(job)) : c.html(workdaySignIn(job))));
+  }
+  // 15: the same application built with standard markup only (no Workday names), behind the same sign-in.
+  app.get('/jobs/15', (c) => c.html(altPosting('15')));
+  app.get('/jobs/15/apply', (c) => (getCookie(c, 'wd_session') ? c.html(altApply('15')) : c.html(workdaySignIn('15'))));
+  app.post('/wdlogin', async (c) => {
+    const body = await c.req.parseBody();
+    const job = c.req.query('job') ?? '13';
+    if (!body.email || !body.password) return c.html(workdaySignIn(job));
+    setCookie(c, 'wd_session', '1', { path: '/' });
+    return c.redirect(`/jobs/${job}/apply`);
+  });
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));
   // Has a visible CAPTCHA widget: must go to the human queue.

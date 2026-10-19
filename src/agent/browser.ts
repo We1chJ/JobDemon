@@ -119,6 +119,15 @@ async function showLetterPanel(page: Page, appId: number) {
   })()`).catch(() => {});
 }
 
+/** Take a handed-over form back so the bot can carry on in it. Returns null if it is no longer open. */
+export function takeBackForm(appId: number) {
+  const tabs = openForms.get(appId);
+  if (!tabs || !tabs.pages().length) return null;
+  openForms.delete(appId);
+  tabs.guard(); // the bot is working in it again: form submissions are refused
+  return tabs;
+}
+
 export function openFormPage(appId: number) {
   const page = openForms.get(appId)?.pages().pop();
   if (!page) openForms.delete(appId);

@@ -274,6 +274,8 @@ if (sf) {
   });
   update();
 }
+// Settings that save as soon as they change.
+document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('[data-autosubmit]')) e.target.form.requestSubmit(); });
 // Copy buttons.
 document.addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('[data-copy]');

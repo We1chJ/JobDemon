@@ -15,9 +15,13 @@ import { layout, badge, flash, ago, STATUS, OPS } from './views.js';
 import { SCREENING, OTHER, currentChoice, applyChoices } from './screening.js';
 import { FIELD_GROUPS, toForm, fromForm, type Job, type School } from './profileForm.js';
 import { draftFromResume } from '../resumeParse.js';
-import { isFormOpen, showForm, letterPath } from '../agent/browser.js';
-import { portalName } from '../portals/index.js';
+import { isFormOpen, showForm, letterPath, openFormPage } from '../agent/browser.js';
+import { fillPage } from '../portals/fillPage.js';
+import { portalName, continueApplication } from '../portals/index.js';
+import { makeDecider } from '../decider/index.js';
+import { makeWriter } from '../writer/index.js';
 import { DEFAULT_GUIDELINES } from '../qa/guidelines.js';
+import { loadSettings, saveSettings, MAX_CONCURRENCY } from '../settings.js';
 
 type App = typeof schema.application.$inferSelect;
 
@@ -40,6 +44,11 @@ function startRun(onlyIds?: number[]) {
     });
 }
 
+// "Fill this page" / "Continue from here" in progress (application id -> what it's doing), and the last fill result.
+const working = new Map<number, string>();
+const fillResult = new Map<number, string>();
+const busy = () => runState.running || working.size > 0;
+
 const read = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
 const tpl = (f: string) => read(path.join(config.templatesDir, f));
 function setupStatus() {
@@ -53,7 +62,7 @@ function setupStatus() {
 }
 
 const allApps = () => db.select().from(schema.application).orderBy(desc(schema.application.updatedAt)).all();
-const version = (apps: App[]) => `${runState.running}:${apps.length}:${apps[0]?.updatedAt ?? ''}`;
+const version = (apps: App[]) => `${runState.running}:${[...working.keys()].join('.')}:${fillResult.size}:${apps.length}:${apps[0]?.updatedAt ?? ''}`;
 const STATUS_ORDER = ['waiting_for_you', 'human_review', 'ready_to_submit', 'in_progress', 'queued', 'applied', 'duplicate'];
 const YOUR_TURN = ['waiting_for_you', 'human_review', 'ready_to_submit'];
 const FILTERS: [string, string][] = [['all', 'All'], ['waiting_for_you', 'Sign in'], ['human_review', 'Needs you'], ['ready_to_submit', 'Ready to submit'], ['applied', 'Applied'], ['queued', 'Queued'], ['duplicate', 'Skipped']];
@@ -85,17 +94,18 @@ app.get('/', (c) => {
   const queued = count('queued');
   const yourTurn = apps.filter((a) => YOUR_TURN.includes(a.status)).sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   const n = (s: string) => (s === 'all' ? apps.length : s === 'queued' ? queued + count('in_progress') : count(s));
+  const { concurrency } = loadSettings();
 
   return c.html(layout({ title: 'Applications', active: 'apps' }, html`
 <div class="page-head"><h1>Applications</h1></div>
 ${flash(c.req.query('msg'))}
 ${missing.length ? html`<div class="callout t-warn" role="status"><b>Finish Setup before adding real links.</b> You still need to ${missing.join(', ')}. <a href="/setup">Go to Setup</a></div>` : ''}
 
-<section class="sec" id="turn" data-live data-running="${runState.running ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="turn-h">
+<section class="sec" id="turn" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="turn-h">
 <div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="muted">${yourTurn.length ? `${yourTurn.length} waiting for you` : ''}</span></div>
 ${yourTurn.length ? html`<ul class="turn">${yourTurn.map((a) => html`<li>
 <div class="turn-main">${badge(a.status)} <a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">at ${a.company}</span>` : ''}
-<div class="turn-what">${whatToDo(a)}</div></div>
+<div class="turn-what">${whatToDo(a)}</div>${fillResult.has(a.id) ? html`<div class="turn-what">${fillResult.get(a.id)}</div>` : ''}</div>
 <div class="row">${actions(a)}</div></li>`)}</ul>`
     : html`<p class="empty" style="padding:8px 0 0">Nothing needs you right now. ${apps.length ? 'Finished forms appear here as the bot stops at each Submit button.' : 'Add job links below to begin.'}</p>`}
 </section>
@@ -103,17 +113,23 @@ ${yourTurn.length ? html`<ul class="turn">${yourTurn.map((a) => html`<li>
 <section class="sec" aria-labelledby="add-h">
 <form method="post" action="/urls">
 <h2 id="add-h">Add job links</h2>
-<p class="note">One per line. The bot starts on them right away, each in its own browser tab, and stops at every Submit button for you.</p>
+<p class="note">One per line. They wait in the queue until you click <b>Start</b> below (all of them) or <b>Run</b> on one. The bot stops at every Submit button for you.</p>
 <label class="lbl sr" for="urls">Job links</label>
 <textarea id="urls" name="urls" placeholder="https://job-boards.greenhouse.io/company/jobs/1234567" required></textarea>
-<div class="row" style="margin-top:12px"><button class="btn btn-primary">Add links</button></div>
+<div class="row" style="margin-top:12px"><button class="btn btn-primary">Add to queue</button></div>
+</form>
+<form method="post" action="/settings" class="row" style="margin-top:12px">
+<label for="concurrency" class="muted" style="font-size:14px">Fill</label>
+<select id="concurrency" name="concurrency" data-autosubmit style="width:auto;min-height:32px;padding:4px 8px">${Array.from({ length: MAX_CONCURRENCY }, (_, i) => i + 1).map((k) => html`<option value="${k}" ${k === concurrency ? 'selected' : ''}>${k}</option>`)}</select>
+<span class="muted" style="font-size:14px">application${concurrency === 1 ? '' : 's'} at a time, each in its own tab.${runState.running ? ' Takes effect on the next run.' : ''}</span>
+<noscript><button class="btn btn-sm">Save</button></noscript>
 </form></section>
 
-<section class="sec" id="all" data-live data-running="${runState.running ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="list-h">
+<section class="sec" id="all" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="list-h">
 <div class="sec-head"><h2 id="list-h">All applications</h2>
 <span class="muted" aria-live="polite">${runState.running
     ? html`<span class="running">Running</span> · ${queued} still queued · this page updates by itself`
-    : queued ? html`${queued} queued <form method="post" action="/run" class="inline"><button class="btn btn-sm" style="margin-left:8px">Start</button></form>` : runState.last}</span></div>
+    : queued ? html`${queued} queued <form method="post" action="/run" class="inline"><button class="btn btn-sm btn-primary" style="margin-left:8px">Start (${queued})</button></form>` : runState.last}</span></div>
 <nav class="filters" aria-label="Filter by status">${FILTERS.map(([k, l]) => html`<a href="${k === 'all' ? '/' : `/?s=${k}`}" ${filter === k ? html`aria-current="true"` : ''}>${l} <b>${n(k)}</b></a>`)}</nav>
 ${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Application</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.map(row)}</tbody></table>` : html`<p class="empty">${apps.length ? 'No applications have this status.' : 'No applications yet.'}</p>`}
 </section>`));
@@ -126,6 +142,7 @@ function row(a: App) {
 <a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">at ${a.company}</span>` : ''}
 <div class="app-meta">#${a.id}${isFormOpen(a.id) ? ' · open in browser' : ''}</div>
 ${a.reason && a.status !== 'applied' ? html`<div class="app-reason" title="${a.reason}">${a.reason}</div>` : ''}
+${fillResult.has(a.id) ? html`<div class="app-reason">${fillResult.get(a.id)}</div>` : ''}
 ${letterPeek(a.id)}
 </td>
 <td class="c-portal"><a href="${a.url}" target="_blank" rel="noopener" title="${a.url}">${portalName(a.url) ?? new URL(a.url).host}</a></td>
@@ -149,6 +166,10 @@ function actions(a: App, compact = false) {
   const btn = (act: string, label: string, cls = '', confirmMsg = '') =>
     html`<form class="inline" method="post" action="/app/${a.id}/${act}" ${confirmMsg ? html`data-confirm="${confirmMsg}"` : ''}><button class="btn${sm} ${cls}">${label}</button></form>`;
   const remove = btn('dismiss', 'Remove', 'btn-ghost', 'Remove this application from the list?');
+  // Fills the empty fields on the page the tab shows now; only once the bot has handed the tab to you.
+  // Both act on the tab the bot handed to you: fill just this page, or carry on through the next pages to Submit.
+  const fillHere = working.has(a.id) ? html`<span class="muted" style="font-size:14px">${working.get(a.id)}</span>`
+    : isFormOpen(a.id) ? html`${btn('resume', 'Continue from here')}${btn('fillpage', 'Fill this page')}` : '';
   if (a.status === 'queued') return html`${btn('runone', 'Run', 'btn-primary')}${remove}`;
   if (a.status === 'in_progress') return '';
   if (a.status === 'applied') return '';
@@ -156,17 +177,23 @@ function actions(a: App, compact = false) {
   const open = isFormOpen(a.id)
     ? btn('show', a.status === 'waiting_for_you' ? 'Open sign-in' : 'Open form', 'btn-primary')
     : btn('requeue', 'Run again', 'btn-primary');
-  return html`${open}${a.status === 'waiting_for_you' ? '' : btn('applied', 'Mark submitted')}${remove}`;
+  return html`${open}${fillHere}${a.status === 'waiting_for_you' ? '' : btn('applied', 'Mark submitted')}${remove}`;
 }
 
-app.get('/api/status', (c) => c.json({ running: runState.running, version: version(allApps()) }));
+app.get('/api/status', (c) => c.json({ running: busy(), version: version(allApps()) }));
 
 app.post('/urls', async (c) => {
   const body = await c.req.parseBody();
   const { added, skipped } = enqueue(parseUrls(String(body.urls ?? '')));
-  if (added) startRun();
-  const msg = added ? `Added ${added} link${added === 1 ? '' : 's'}${skipped ? ` (${skipped} already in the list)` : ''}. The bot is starting on them.` : 'Nothing new: those links are already in the list.';
+  // Adding only queues: nothing starts until you click Start (all) or Run (one).
+  const msg = added ? `Added ${added} link${added === 1 ? '' : 's'} to the queue${skipped ? ` (${skipped} already in the list)` : ''}. Click Start to run the queue, or Run on one application.` : 'Nothing new: those links are already in the list.';
   return c.redirect(`/?msg=${encodeURIComponent(msg)}`);
+});
+
+app.post('/settings', async (c) => {
+  saveSettings({ concurrency: Number((await c.req.parseBody()).concurrency) });
+  const { concurrency } = loadSettings();
+  return c.redirect(`/?msg=${encodeURIComponent(`Saved: ${concurrency} application${concurrency === 1 ? '' : 's'} at a time.${runState.running ? ' Takes effect on the next run.' : ''}`)}`);
 });
 
 app.post('/run', (c) => {
@@ -186,6 +213,28 @@ app.post('/app/:id/:act', async (c) => {
     case 'requeue': updateApp(id, { status: 'queued', reason: null, step: 0 }); startRun([id]); break;
     case 'runone': if (a.status === 'queued') startRun([id]); break;
     case 'dismiss': updateApp(id, { status: 'duplicate', reason: 'Removed by you' }); break;
+    case 'fillpage': {
+      const page = isFormOpen(id) ? openFormPage(id) : null;
+      if (!page) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Run again.')}`);
+      if (working.has(id)) break;
+      working.set(id, 'Filling this page…');
+      fillResult.delete(id);
+      fillPage(id, page)
+        .then((m) => fillResult.set(id, m))
+        .catch((e: Error) => fillResult.set(id, `Error: ${e.message.split('\n')[0]}`))
+        .finally(() => working.delete(id));
+      break;
+    }
+    case 'resume': {
+      if (!isFormOpen(id)) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Run again.')}`);
+      if (working.has(id) || a.status === 'in_progress') break;
+      working.set(id, 'Continuing from this page…');
+      fillResult.delete(id);
+      continueApplication(a, makeDecider(), makeWriter())
+        .catch((e: Error) => updateApp(id, { status: 'human_review', reason: `Error: ${e.message.split('\n')[0]}` }))
+        .finally(() => working.delete(id));
+      break;
+    }
   }
   const back = c.req.header('referer');
   return c.redirect(back && new URL(back).pathname.startsWith('/app/') ? back : '/');
@@ -276,6 +325,7 @@ const removeBtn = (what: string) =>
 const jobRow = (j: Job) => html`<div class="rep"><div class="rep-head"><span class="rep-title">Job</span>${removeBtn('job')}</div><div class="fgrid">
 <label class="fld"><span>Company</span><input type="text" name="job_company" value="${j.company}" placeholder="Acme Corp"></label>
 <label class="fld"><span>Title</span><input type="text" name="job_title" value="${j.title}" placeholder="Software Engineer"></label>
+<label class="fld"><span>Location</span><input type="text" name="job_location" value="${j.location}" placeholder="Boston, MA"></label>
 <label class="fld"><span>Start</span><input type="text" name="job_start" value="${j.start}" placeholder="2021-07"></label>
 <label class="fld"><span>End</span><input type="text" name="job_end" value="${j.end}" placeholder="present"></label>
 <label class="fld wide"><span>Highlights</span><textarea name="job_highlights" rows="3" placeholder="One per line, with numbers where you can. e.g. Cut CI time from 25 to 8 minutes.">${j.highlights.join('\n')}</textarea></label>
@@ -284,6 +334,7 @@ const eduRow = (e: School) => html`<div class="rep"><div class="rep-head"><span 
 <label class="fld"><span>School</span><input type="text" name="edu_school" value="${e.school}" placeholder="State University"></label>
 <label class="fld"><span>Degree</span><input type="text" name="edu_degree" value="${e.degree}" placeholder="BS"></label>
 <label class="fld"><span>Field of study</span><input type="text" name="edu_discipline" value="${e.discipline}" placeholder="Computer Science"></label>
+<label class="fld"><span>Location</span><input type="text" name="edu_location" value="${e.location}" placeholder="Needham, MA"></label>
 <label class="fld"><span>Start date</span><input type="date" name="edu_start" value="${e.start.length === 7 ? `${e.start}-01` : e.start}"><small>Fills start-date questions.</small></label>
 <label class="fld"><span>End / graduation date</span><input type="date" name="edu_date" value="${e.date}"><input type="hidden" name="edu_year" value="${e.year}"><small>Fills end-date and graduation questions.</small></label>
 <label class="fld"><span>GPA</span><input type="text" name="edu_gpa" value="${e.gpa}" placeholder="3.8" inputmode="decimal"></label>
@@ -370,11 +421,11 @@ ${d.choices
 </div>
 <h3 class="sub">Work history <small>Most recent first. The first job is used as your current company and title.</small></h3>
 <div id="job-rows" class="reps">${pf.jobs.map(jobRow)}</div>
-<template id="tpl-job">${jobRow({ company: '', title: '', start: '', end: '', highlights: [] })}</template>
+<template id="tpl-job">${jobRow({ company: '', title: '', location: '', start: '', end: '', highlights: [] })}</template>
 <button type="button" class="btn btn-sm" data-add="job">Add job</button>
 <h3 class="sub">Education <small>The first entry fills school, degree and graduation-year fields.</small></h3>
 <div id="edu-rows" class="reps">${pf.schools.map(eduRow)}</div>
-<template id="tpl-edu">${eduRow({ school: '', degree: '', discipline: '', year: '', date: '', start: '', gpa: '' })}</template>
+<template id="tpl-edu">${eduRow({ school: '', degree: '', discipline: '', location: '', year: '', date: '', start: '', gpa: '' })}</template>
 <button type="button" class="btn btn-sm" data-add="edu">Add education</button>
 <h3 class="sub">Interests <small>Optional</small></h3>
 <label class="fld wide"><span class="sr">Interests</span><textarea name="interests" rows="2" placeholder="What kind of work or products you care about.">${pf.interests}</textarea></label>

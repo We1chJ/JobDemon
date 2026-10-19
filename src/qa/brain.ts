@@ -23,6 +23,7 @@ const state = (q: Question, ctx: Context, chosen: string[] = []) => ({
   ...(q.multiple ? { select_all_that_apply: true } : {}),
   ...(chosen.length ? { already_chosen: chosen } : {}),
   ...(q.previous ? { previous_question: q.previous } : {}),
+  ...(q.feedback ? { form_said_about_last_answer: q.feedback } : {}),
   ...(ctx.portal ? { portal: ctx.portal } : {}),
   job: { company: ctx.job.company, role: ctx.job.role },
   applicant_facts: ctx.facts.map((f) => ({ key: f.key, value: f.value })),
@@ -81,9 +82,23 @@ const KEY_RULES: [RegExp, string][] = [
   [/country (phone )?code|phone code/i, 'country'], [/phone/i, 'phone'],
   [/linkedin/i, 'linkedin_url'], [/github/i, 'github_url'], [/website|portfolio/i, 'website_url'],
   [/location|city/i, 'location_city'], [/country/i, 'country'],
-  [/gender/i, 'gender'], [/pronoun/i, 'pronouns'], [/veteran/i, 'veteran_status'], [/disabilit/i, 'disability_status'],
+  [/skills/i, 'skills'], [/gender/i, 'gender'], [/pronoun/i, 'pronouns'], [/veteran/i, 'veteran_status'], [/disabilit/i, 'disability_status'],
 ];
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+// Numbered entries in repeating sections ("Work Experience 2 > Job Title") point at that entry's facts.
+const ENTRY_FIELDS: [RegExp, string][] = [
+  [/job title|title/i, 'title'], [/company|employer/i, 'company'], [/^from$|start/i, 'start'], [/^to$|end|graduat/i, 'end'],
+  [/description|responsibilit/i, 'description'], [/school|university|institution/i, 'school'], [/degree/i, 'degree'], [/field of study|major/i, 'field'], [/gpa/i, 'gpa'],
+];
+function entryFact(prompt: string, ctx: Context): Fact | undefined {
+  const m = prompt.match(/^(.+?)\s+(\d+)\s*>\s*(.+)$/i);
+  if (!m) return undefined;
+  const kind = /work|job|experience|employ|position/i.test(m[1]) ? 'work_history' : /educ|school|universit/i.test(m[1]) ? 'education' : '';
+  const field = ENTRY_FIELDS.find(([re]) => re.test(m[3].trim()))?.[1];
+  if (!kind || !field) return undefined;
+  const key = `${kind}_${m[2]}_${field}`;
+  return ctx.facts.find((f) => f.key === key);
+}
 
 class FakeBrain implements Brain {
   constructor(private decider: Decider, private writer: Writer) {}
@@ -126,7 +141,19 @@ class FakeBrain implements Brain {
     const one = (i: number) => ({ indexes: i >= 0 ? [i] : [], confidence: 0.95 });
     if (/autofill/i.test(prompt)) return one(-1);
     if (/privacy|code of conduct|terms (and|&|of)|consent/i.test(prompt)) return one(candidates.length === 1 ? 0 : idx(/^(i )?(agree|accept|acknowledge|consent)|^yes\b/i, /\b(not|don.?t|do not)\b/i));
-    if (/hear about/i.test(prompt)) return one(idx(/^other\b/i));
+    const sections = prompt.match(/how many entries should the "(.+)" section/i);
+    if (sections) {
+      const n = this.fact(ctx, /work|job|experience|employ/i.test(sections[1]) ? 'work_history_count' : /educ|school/i.test(sections[1]) ? 'education_count' : '')?.value ?? '0';
+      return one(candidates.indexOf(n));
+    }
+    if (/currently work/i.test(prompt)) {
+      const m = prompt.match(/(\d+)\s*>/);
+      return one(m && this.fact(ctx, `work_history_${m[1]}_end`)?.value === 'present' ? 0 : -1);
+    }
+    if (/hear about/i.test(prompt)) { // guideline: LinkedIn, else Instagram, else the closest category
+      for (const re of [/linkedin/i, /instagram/i, /job board|social/i, /^other\b/i]) { const i = idx(re); if (i >= 0) return one(i); }
+      return one(-1);
+    }
     if (q.multiple && /languages?|skills|proficien/i.test(prompt)) {
       const skills = new Set((this.fact(ctx, 'skills')?.value ?? '').toLowerCase().split(/,\s*/));
       return { indexes: candidates.flatMap((c, i) => (skills.has(c.trim().toLowerCase()) ? [i] : [])), confidence: 0.95 };
@@ -134,7 +161,7 @@ class FakeBrain implements Brain {
     if (/resume|\bcv\b/i.test(prompt)) return one(idx(/resume/i));
     if (/transcript/i.test(prompt)) return one(idx(/transcript/i));
     if (/cover letter/i.test(prompt)) return one(idx(/cover letter/i));
-    const v = this.desired(prompt, ctx);
+    const v = entryFact(prompt, ctx)?.value ?? this.desired(prompt, ctx);
     const m = this.match(candidates, v);
     if (m >= 0) return one(m);
     if (/gender|race|ethnic|veteran|disabilit|pronoun/i.test(prompt)) return one(idx(/decline|prefer not|not to (say|answer)/i));
@@ -150,6 +177,8 @@ class FakeBrain implements Brain {
     if (/cover letter/i.test(prompt)) return { write: 'cover_letter' as const, confidence: 0.95 };
     if (/why|describe|tell us/i.test(prompt)) return { write: 'paragraph' as const, confidence: 0.95 };
     if (/\bext(ension)?\b/i.test(prompt)) return { confidence: 0.95 };
+    const entry = entryFact(prompt, ctx);
+    if (entry) return { fact: entry, confidence: 0.95 };
     const rule = KEY_RULES.find(([re]) => re.test(prompt));
     const fact = (rule && this.fact(ctx, rule[1])) || this.screening(prompt, ctx);
     return fact ? { fact, confidence: 0.95 } : { confidence: 0.95 };

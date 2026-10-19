@@ -33,6 +33,8 @@ export interface Question {
   required: boolean;
   /** The question just above this one, for follow-ups like "If so, please explain". */
   previous?: { prompt: string; answer: string };
+  /** What the form said about the last answer (e.g. a validation error), when asking again. */
+  feedback?: string;
 }
 
 export type Answer =

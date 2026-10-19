@@ -25,12 +25,22 @@ export async function pageErrors(page: Page): Promise<string[]> {
 export class Session {
   page!: Page;
   keep = false;
+  resumed = false; // carrying on in a tab you already had open ("Continue from here")
   step: number;
   readonly traceDir: string;
   private constructor(readonly app: App, readonly tabs: AppTabs) {
     this.step = app.step;
     this.traceDir = path.join(config.tracesDir, String(app.id));
     fs.mkdirSync(this.traceDir, { recursive: true });
+  }
+
+  /** Carry on in an application's open tab, from whatever page it shows. */
+  static resume(app: App, tabs: AppTabs) {
+    const s = new Session(app, tabs);
+    s.page = tabs.pages().pop()!;
+    s.resumed = true;
+    updateApp(app.id, { status: 'in_progress', reason: null });
+    return s;
   }
 
   static async start(app: App) {
@@ -103,7 +113,7 @@ export class Session {
 
   /** End of a run: the form is always handed to you, filled as far as the bot could get. */
   async finish(o: { handled: number; needs: string[]; notes: string[]; elements?: ElementInfo[]; stoppedAt?: ElementInfo }) {
-    if (o.handled === 0) {
+    if (o.handled === 0 && !this.resumed) {
       return this.toReview(`Couldn't find the application form on this page${o.notes.length ? ` (${o.notes.join('; ')})` : ''}. Open it in the browser: it may need a click the bot didn't recognise, or a sign-in.`);
     }
     const s = await this.shot('filled');
@@ -125,9 +135,15 @@ export class Session {
 /** Read the posting, record company/role, and skip duplicates. Returns null when it's a duplicate. */
 export async function prepareJob(s: Session) {
   const { profile, version, bank } = loadProfile();
-  const info = await readJob(s.page);
+  const read = await readJob(s.page);
+  // Carrying on mid-application: the company and role read at the start are better than this page's.
+  const info = s.resumed && s.app.company ? { ...read, company: s.app.company, role: s.app.role ?? read.role } : read;
   const applicant = profile.fields.email ?? '';
   updateApp(s.app.id, { company: info.company, role: info.role, applicant });
+  if (s.resumed) {
+    const job: JobCtx = { appId: s.app.id, url: s.app.url, company: info.company, role: info.role, jd: info.jd };
+    return { info, job, ctx: buildContext(profile, version, bank, job) };
+  }
   const dup = db.select().from(schema.application).where(and(
     eq(schema.application.company, info.company), eq(schema.application.role, info.role),
     eq(schema.application.applicant, applicant), ne(schema.application.id, s.app.id),

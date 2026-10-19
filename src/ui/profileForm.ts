@@ -73,8 +73,8 @@ export const PROFILE_HINTS: Record<string, string> = {
   citizenship_status: 'Citizenship or immigration status (U.S. citizen, permanent resident, visa holder...).',
 };
 
-export interface Job { company: string; title: string; start: string; end: string; highlights: string[] }
-export interface School { school: string; degree: string; discipline: string; year: string; date: string; start: string; gpa: string }
+export interface Job { company: string; title: string; location: string; start: string; end: string; highlights: string[] }
+export interface School { school: string; degree: string; discipline: string; location: string; year: string; date: string; start: string; gpa: string }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -82,11 +82,11 @@ const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v
 export function toForm(p: Profile) {
   const f = p.facts ?? {};
   const jobs = (Array.isArray(f.work_history) ? f.work_history : []).map((j: Record<string, unknown>): Job => ({
-    company: s(j.company), title: s(j.title), start: s(j.start), end: s(j.end),
+    company: s(j.company), title: s(j.title), location: s(j.location), start: s(j.start), end: s(j.end),
     highlights: Array.isArray(j.highlights) ? j.highlights.map(s) : [],
   }));
   const schools = (Array.isArray(f.education) ? f.education : []).map((e: Record<string, unknown>, i: number): School => ({
-    school: s(e.school), degree: s(e.degree), year: s(e.year), date: s(e.date), start: s(e.start), gpa: s(e.gpa),
+    school: s(e.school), degree: s(e.degree), location: s(e.location), year: s(e.year), date: s(e.date), start: s(e.start), gpa: s(e.gpa),
     // Older files kept the field of study only in fields.discipline.
     discipline: s(e.discipline) || (i === 0 ? s(p.fields?.discipline) : ''),
   }));
@@ -95,8 +95,8 @@ export function toForm(p: Profile) {
     summary: s(f.summary),
     skills: Array.isArray(f.skills) ? f.skills.map(s).join(', ') : s(f.skills),
     interests: s(f.interests),
-    jobs: jobs.length ? jobs : [{ company: '', title: '', start: '', end: '', highlights: [] }],
-    schools: schools.length ? schools : [{ school: '', degree: '', discipline: '', year: '', date: '', start: '', gpa: '' }],
+    jobs: jobs.length ? jobs : [{ company: '', title: '', location: '', start: '', end: '', highlights: [] }],
+    schools: schools.length ? schools : [{ school: '', degree: '', discipline: '', location: '', year: '', date: '', start: '', gpa: '' }],
   };
 }
 
@@ -115,7 +115,7 @@ export function fromForm(b: Body, existing: Profile): Profile {
   const jobs: Job[] = [];
   for (let i = 0; i < n; i++) {
     const j = {
-      company: list(b, 'job_company')[i], title: list(b, 'job_title')[i],
+      company: list(b, 'job_company')[i], title: list(b, 'job_title')[i], location: list(b, 'job_location')[i] ?? '',
       start: list(b, 'job_start')[i] ?? '', end: list(b, 'job_end')[i] ?? '',
       highlights: (list(b, 'job_highlights')[i] ?? '').split('\n').map((h) => h.replace(/^[-•*]\s*/, '').trim()).filter(Boolean),
     };
@@ -126,7 +126,7 @@ export function fromForm(b: Body, existing: Profile): Profile {
   for (let i = 0; i < m; i++) {
     const date = list(b, 'edu_date')[i] ?? '';
     // Graduation date (YYYY-MM-DD) wins; older entries only had a year.
-    const e = { school: list(b, 'edu_school')[i], degree: list(b, 'edu_degree')[i] ?? '', discipline: list(b, 'edu_discipline')[i] ?? '', year: date ? date.slice(0, 4) : list(b, 'edu_year')[i] ?? '', date,
+    const e = { school: list(b, 'edu_school')[i], degree: list(b, 'edu_degree')[i] ?? '', discipline: list(b, 'edu_discipline')[i] ?? '', location: list(b, 'edu_location')[i] ?? '', year: date ? date.slice(0, 4) : list(b, 'edu_year')[i] ?? '', date,
       start: list(b, 'edu_start')[i] ?? '', gpa: list(b, 'edu_gpa')[i] ?? '' };
     if (e.school || e.degree) schools.push(e);
   }

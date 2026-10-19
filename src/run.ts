@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { db, schema } from './db/index.js';
 import { enqueueFile } from './intake.js';
 import { loadProfile } from './profile.js';
+import { loadSettings } from './settings.js';
 import { makeDecider } from './decider/index.js';
 import { makeWriter } from './writer/index.js';
 import { runApplication } from './portals/index.js';
@@ -32,7 +33,7 @@ export async function processQueue(onlyIds?: number[]) {
       console.log(`  #${app.id} ${done.status}${done.reason ? `: ${done.reason}` : ''}`);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, config.concurrency) }, worker));
+  await Promise.all(Array.from({ length: loadSettings().concurrency }, worker));
   return apps.length;
 }
 

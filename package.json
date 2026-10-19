@@ -9,7 +9,7 @@
     "profile:import": "tsx src/importProfile.ts",
     "mock": "tsx mock/server.ts",
     "test:e2e": "tsx mock/e2e.ts",
-    "test:qa": "tsx --test mock/qa.test.ts",
+    "test:qa": "tsx --test mock/qa.test.ts mock/workday.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "repository": {
