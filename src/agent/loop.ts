@@ -28,8 +28,9 @@ function isFinalButton(el: ElementInfo, jevSaysSubmit: number) {
  * Fills one application and stops at the final button. Never submits.
  * The form (filled, or partly filled if the bot needed help) is left open for you to review and submit.
  */
-export async function runGeneric(s: Session, decider: Decider, writer: Writer, startAt: string) {
+export async function runGeneric(s: Session, decider: Decider, writer: Writer, startAt: string, isWorkdayPage: (p: Page) => Promise<boolean>): Promise<'workday' | void> {
   const app = s.app;
+  let handedOver = false;
   const opened: Page[] = [];
   s.tabs.onTab((p) => opened.push(p)); // links that open the application in a new tab
 
@@ -70,6 +71,12 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
         await s.page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
         await s.page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
         s.log('NOTE', undefined, `Followed the application into a new tab: ${s.page.url()}`);
+      }
+      // A careers site handed the application on to Workday: the Workday flow takes over in this tab.
+      if (await isWorkdayPage(s.page)) {
+        s.log('NOTE', undefined, `Workday page: the Workday flow takes over (${s.page.url()})`);
+        handedOver = true;
+        return 'workday';
       }
       const blocker = await detectBlocker(s.page);
       // Sign-in / create-account / verify-email: wait for you, then carry on.
@@ -192,6 +199,6 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
     // Only reached if the page itself fails (won't load, browser closed).
     await s.toReview(`Error: ${(err as Error).message.split('\n')[0]}`);
   } finally {
-    await s.close();
+    if (!handedOver) await s.close();
   }
 }

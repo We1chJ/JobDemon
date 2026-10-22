@@ -11,6 +11,7 @@ import { loadSettings } from './settings.js';
 import { makeDecider } from './decider/index.js';
 import { makeWriter } from './writer/index.js';
 import { runApplication } from './portals/index.js';
+import './panel.js'; // the widget in form tabs can act on applications
 import { closeBrowser, openFormCount, waitForBrowserClose } from './agent/browser.js';
 
 /** Run queued applications: all of them, or only the ones whose ids are given. */

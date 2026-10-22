@@ -25,6 +25,12 @@ async function getContext() {
     }
     return route.continue();
   });
+  await context.exposeBinding('__jobdemon', async (source, action: unknown) => {
+    if (source.frame !== source.page.mainFrame() || !panelHandler) return null;
+    const appId = [...openForms].find(([, tabs]) => tabs.pages().includes(source.page))?.[0];
+    return appId === undefined ? null : panelHandler(appId, String(action));
+  });
+  await context.addInitScript(PANEL_JS);
   for (const p of context.pages()) await p.close().catch(() => {}); // the empty start-up tab
   context.on('close', () => { context = null; openForms.clear(); guarded.clear(); });
   return context;
@@ -65,58 +71,114 @@ export async function lendTabs(appId: number, tabs: AppTabs) {
   if (openForms.get(appId) !== tabs) await openForms.get(appId)?.close();
   openForms.set(appId, tabs);
   tabs.unguard();
-  await tabs.pages().pop()?.bringToFront().catch(() => {});
+  const page = tabs.pages().pop();
+  if (page) { await showPanel(page); await page.bringToFront().catch(() => {}); }
 }
 
 /** Hand a form over to the applicant: the bot stops touching it and the submit guard is lifted. */
 export async function keepForm(appId: number, tabs: AppTabs) {
   tabs.unguard();
   const page = tabs.pages().pop(); // the tab the bot ended on
-  if (page) await showLetterPanel(page, appId);
+  if (page) await showPanel(page);
   if (openForms.get(appId) !== tabs) await openForms.get(appId)?.close();
   openForms.set(appId, tabs);
 }
 
 export const letterPath = (appId: number) => path.join(config.lettersDir, `${appId}-cover-letter.txt`);
 
-/**
- * Corner panel in the application tab showing the cover letter the bot generated, so you can check it
- * (especially when it went in as an uploaded file). Lives in a shadow root outside the form; adds no inputs.
- */
-async function showLetterPanel(page: Page, appId: number) {
-  const file = letterPath(appId);
-  if (!fs.existsSync(file)) return;
-  const text = fs.readFileSync(file, 'utf8');
-  // Built from a string so the bundler can't inject helpers that don't exist in the page.
-  await page.evaluate(`(() => {
-    const text = ${JSON.stringify(text)};
-    document.getElementById('jobdemon-letter')?.remove();
-    const host = document.createElement('div');
-    host.id = 'jobdemon-letter';
-    host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647';
+// ── The JobDemon widget ─────────────────────────────────────────────────────
+// A small panel drawn in every tab the bot hands to you: status, what to do next, "Continue from here",
+// "Mark submitted", and the cover letter. Clicks go to the bot through a page binding. The bot only answers
+// tabs it has handed to you, only from the page itself (not from frames inside it), and only for those actions.
+type PanelHandler = (appId: number, action: string) => Promise<unknown>;
+let panelHandler: PanelHandler | null = null;
+export const setPanelHandler = (h: PanelHandler) => { panelHandler = h; };
+
+// Runs in the page. Kept as a plain string so the bundler can't inject helpers that don't exist there.
+const PANEL_JS = String.raw`(() => {
+  if (window.top !== window || window.__jobdemonPanel) return;
+  window.__jobdemonPanel = true;
+  const ask = (action) => (typeof window.__jobdemon === 'function' ? window.__jobdemon(action) : Promise.resolve(null)).catch(() => null);
+  let host = null, ui = null, timer = null;
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const css = '.p{width:min(380px,calc(100vw - 32px));background:#fff;color:#1a1a1a;border:1px solid #b4b4b4;border-radius:6px;box-shadow:0 6px 24px rgb(0 0 0/.18);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}'
+    + '.h{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#1a1a1a;color:#fff;cursor:move;user-select:none;touch-action:none}.h b{font-size:13px}.h .s{flex:1;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.h button{background:transparent;color:#fff;border:1px solid rgb(255 255 255/.4);border-radius:4px;font:inherit;font-size:12px;padding:2px 8px;cursor:pointer}'
+    + '.b{padding:10px 12px;display:grid;gap:10px}.t{color:#444;font-size:13px}.r{display:flex;gap:8px;flex-wrap:wrap}'
+    + '.r button,.c{font:inherit;font-size:13px;font-weight:500;border:1px solid #b4b4b4;background:#fff;color:#1a1a1a;border-radius:4px;padding:6px 10px;cursor:pointer;min-height:32px}'
+    + '.r button.pri{background:#1a1a1a;color:#fff;border-color:#1a1a1a}.r button:disabled{opacity:.5;cursor:default}'
+    + 'details summary{cursor:pointer;font-size:13px;color:#0b57d0}pre{margin:6px 0;white-space:pre-wrap;max-height:40vh;overflow:auto;font:inherit;font-size:13px;line-height:1.55;border:1px solid #ddd;padding:8px;background:#f6f6f4}'
+    + '.min .b{display:none}[hidden]{display:none!important}';
+  const build = () => {
+    host = document.createElement('div');
+    host.id = 'jobdemon-panel';
+    // Top right to start; drag the header to move it. Where you leave it is kept for this tab and site.
+    host.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647';
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem('jobdemon-panel-pos') || 'null'); } catch {}
+    const place = (x, y) => {
+      const w = host.offsetWidth || 380, hgt = host.offsetHeight || 60;
+      x = Math.min(Math.max(0, x), window.innerWidth - Math.min(w, window.innerWidth));
+      y = Math.min(Math.max(0, y), window.innerHeight - Math.min(hgt, 40));
+      host.style.left = x + 'px'; host.style.top = y + 'px'; host.style.right = 'auto';
+      return { x, y };
+    };
     const root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = \`<style>
-      .p{width:min(440px,calc(100vw - 32px));background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 10px 30px rgb(15 23 42/.25);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;overflow:hidden}
-      .h{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e3a5f;color:#fff}
-      .h b{flex:1;font-size:14px}
-      button{font-family:inherit;font-size:13px;font-weight:600;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:8px;padding:6px 10px;cursor:pointer;min-height:32px}
-      .h button{background:transparent;color:#fff;border-color:rgb(255 255 255/.4)}
-      pre{margin:0;padding:12px 14px;white-space:pre-wrap;max-height:55vh;overflow:auto;font-family:inherit;font-size:14px;line-height:1.6}
-      .f{display:flex;gap:8px;justify-content:flex-end;padding:8px 12px;border-top:1px solid #e2e8f0}
-      .min pre,.min .f{display:none}
-    </style>
-    <div class="p" role="complementary" aria-label="Cover letter from JobDemon">
-      <div class="h"><b>Cover letter (JobDemon)</b><button class="t" aria-expanded="true">Hide</button><button class="x" aria-label="Close panel">\u2715</button></div>
-      <pre></pre>
-      <div class="f"><button class="c">Copy text</button></div>
-    </div>\`;
-    root.querySelector('pre').textContent = text;
-    const p = root.querySelector('.p'), t = root.querySelector('.t');
-    t.onclick = () => { const min = p.classList.toggle('min'); t.textContent = min ? 'Show' : 'Hide'; t.setAttribute('aria-expanded', String(!min)); };
-    root.querySelector('.x').onclick = () => host.remove();
-    root.querySelector('.c').onclick = async (e) => { try { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied'; } catch { e.target.textContent = 'Copy failed'; } };
-    document.body.appendChild(host);
-  })()`).catch(() => {});
+    root.appendChild(el('style', null, css));
+    const p = el('div', 'p'); p.setAttribute('role', 'complementary'); p.setAttribute('aria-label', 'JobDemon');
+    const h = el('div', 'h'); const s = el('span', 's'); const min = el('button', null, 'Hide');
+    h.append(el('b', null, 'JobDemon'), s, min);
+    const b = el('div', 'b'); const todo = el('div', 't'); const row = el('div', 'r');
+    const go = el('button', 'pri', 'Continue from here'); const done = el('button', null, 'Mark submitted');
+    row.append(go, done);
+    const det = el('details'); const pre = el('pre'); const copy = el('button', 'c', 'Copy text');
+    det.append(el('summary', null, 'Cover letter'), pre, copy);
+    b.append(todo, row, det); p.append(h, b); root.appendChild(p);
+    min.onclick = () => { const m = p.classList.toggle('min'); min.textContent = m ? 'Show' : 'Hide'; };
+    h.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      const r = host.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+      h.setPointerCapture(e.pointerId);
+      const move = (ev) => place(ev.clientX - dx, ev.clientY - dy);
+      const up = (ev) => {
+        h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up);
+        const at = place(ev.clientX - dx, ev.clientY - dy);
+        try { sessionStorage.setItem('jobdemon-panel-pos', JSON.stringify(at)); } catch {}
+      };
+      h.addEventListener('pointermove', move); h.addEventListener('pointerup', up);
+    });
+    window.addEventListener('resize', () => { if (host && host.style.left) place(parseFloat(host.style.left), parseFloat(host.style.top)); });
+    go.onclick = async () => { go.disabled = true; go.textContent = 'Starting…'; await ask('resume'); remove(); };
+    done.onclick = async () => { done.disabled = true; done.textContent = 'Closing…'; await ask('applied'); }; // the bot marks it and closes this tab
+    copy.onclick = async () => { try { await navigator.clipboard.writeText(pre.textContent); copy.textContent = 'Copied'; } catch { copy.textContent = 'Copy failed'; } };
+    (document.body || document.documentElement).appendChild(host);
+    if (saved) place(saved.x, saved.y);
+    ui = { s, todo, row, go, done, det, pre };
+  };
+  const remove = () => { if (host) host.remove(); host = null; ui = null; };
+  const render = (st) => {
+    if (!st) { remove(); return; }
+    if (!host) build();
+    ui.s.textContent = st.label + (st.title ? ' · ' + st.title : '');
+    ui.todo.textContent = st.working || st.todo || '';
+    ui.row.hidden = !st.canAct;
+    ui.det.hidden = !st.letter;
+    if (ui.pre.textContent !== st.letter) ui.pre.textContent = st.letter || '';
+  };
+  const tick = async () => { render(await ask('status')); timer = setTimeout(tick, 2500); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick, { once: true }); else tick();
+})()`;
+
+/** Draw the widget in a tab now (new pages get it from the context's init script). */
+async function showPanel(page: Page) {
+  await page.evaluate(PANEL_JS).catch(() => {});
+}
+
+/** Close an application's tabs (it's done). */
+export async function closeForm(appId: number) {
+  const tabs = openForms.get(appId);
+  openForms.delete(appId);
+  await tabs?.close();
 }
 
 /** Take a handed-over form back so the bot can carry on in it. Returns null if it is no longer open. */

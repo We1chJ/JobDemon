@@ -53,6 +53,11 @@ export const SCREENING: ScreeningQ[] = [
   { id: 'previously_employed', question: 'Have you previously worked for this company?',
     help: 'This answer is used for every company. If you have worked for one you will apply to, those applications will need a manual check.',
     options: [{ label: 'No', answer: 'No' }, { label: 'Yes', answer: 'Yes' }] },
+  { id: 'sms_consent', question: 'Do you agree to receive text message (SMS) updates about your job application?',
+    help: 'E.g. "Check Yes or No to indicate your agreement to receive text message updates... Message and data rates may apply."',
+    options: [{ label: 'Yes', answer: 'Yes, I consent to receiving text messages' }, { label: 'No', answer: 'No, I do not consent to receiving text messages' }] },
+  { id: 'spouse_military', question: 'Has your spouse or domestic partner ever served in the U.S. Military?',
+    options: [{ label: 'No', answer: 'No' }, { label: 'Yes', answer: 'Yes' }, { label: 'No spouse or partner', answer: 'I do not have a spouse or domestic partner' }] },
 ];
 
 export const OTHER = '__other';

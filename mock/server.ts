@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -433,6 +433,9 @@ export function mockApp() {
     app.get(`/jobs/${job}`, (c) => c.html(workdayPosting(job)));
     app.get(`/jobs/${job}/apply`, (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply(job)) : c.html(workdaySignIn(job))));
   }
+  // 16: a company careers page (not Workday) whose Apply opens the Workday application in a new tab.
+  app.get('/jobs/16', (c) => c.html(overview('16', '', '<a href="/jobs/16/apply" target="_blank">Apply now</a>')));
+  app.get('/jobs/16/apply', (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply('16')) : c.html(workdaySignIn('16'))));
   // 15: the same application built with standard markup only (no Workday names), behind the same sign-in.
   app.get('/jobs/15', (c) => c.html(altPosting('15')));
   app.get('/jobs/15/apply', (c) => (getCookie(c, 'wd_session') ? c.html(altApply('15')) : c.html(workdaySignIn('15'))));

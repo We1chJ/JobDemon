@@ -35,9 +35,13 @@ export class Session {
   }
 
   /** Carry on in an application's open tab, from whatever page it shows. */
-  static resume(app: App, tabs: AppTabs) {
+  static async resume(app: App, tabs: AppTabs) {
     const s = new Session(app, tabs);
-    s.page = tabs.pages().pop()!;
+    // The tab you're looking at (an application can have a careers tab and a Workday tab); else the newest.
+    const pages = tabs.pages();
+    const seen = await Promise.all(pages.map((p) => p.evaluate(() => document.visibilityState === 'visible' && document.hasFocus()).catch(() => false)));
+    const visible = await Promise.all(pages.map((p) => p.evaluate(() => document.visibilityState === 'visible').catch(() => false)));
+    s.page = pages[seen.lastIndexOf(true)] ?? pages[visible.lastIndexOf(true)] ?? pages[pages.length - 1];
     s.resumed = true;
     updateApp(app.id, { status: 'in_progress', reason: null });
     return s;

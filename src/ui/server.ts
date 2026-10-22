@@ -4,23 +4,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { html } from 'hono/html';
+import { html, raw } from 'hono/html';
 import { asc, desc, eq } from 'drizzle-orm';
 import { config } from '../config.js';
 import { db, schema, updateApp } from '../db/index.js';
 import { enqueue, parseUrls } from '../intake.js';
-import { saveProfile, type BankEntry, type Profile } from '../profile.js';
+import { saveProfile, loadProfile, type BankEntry, type Profile } from '../profile.js';
+import { letterForDescription } from '../content.js';
+import { textToPdf } from '../pdf.js';
+import { makeDecider } from '../decider/index.js';
+import { makeWriter } from '../writer/index.js';
 import { processQueue } from '../run.js';
 import { layout, badge, flash, ago, STATUS, OPS } from './views.js';
 import { SCREENING, OTHER, currentChoice, applyChoices } from './screening.js';
 import { FIELD_GROUPS, toForm, fromForm, type Job, type School } from './profileForm.js';
 import { draftFromResume } from '../resumeParse.js';
-import { isFormOpen, showForm, letterPath, openFormPage } from '../agent/browser.js';
-import { fillPage } from '../portals/fillPage.js';
-import { portalName, continueApplication } from '../portals/index.js';
-import { makeDecider } from '../decider/index.js';
-import { makeWriter } from '../writer/index.js';
+import { isFormOpen, showForm } from '../agent/browser.js';
+import { portalName } from '../portals/index.js';
+import { working, whatToDo, startResume, markSubmitted } from '../panel.js';
 import { DEFAULT_GUIDELINES } from '../qa/guidelines.js';
+import { computeStats } from './stats.js';
+import { build } from 'esbuild';
 import { loadSettings, saveSettings, MAX_CONCURRENCY } from '../settings.js';
 
 type App = typeof schema.application.$inferSelect;
@@ -44,9 +48,6 @@ function startRun(onlyIds?: number[]) {
     });
 }
 
-// "Fill this page" / "Continue from here" in progress (application id -> what it's doing), and the last fill result.
-const working = new Map<number, string>();
-const fillResult = new Map<number, string>();
 const busy = () => runState.running || working.size > 0;
 
 const read = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
@@ -62,22 +63,10 @@ function setupStatus() {
 }
 
 const allApps = () => db.select().from(schema.application).orderBy(desc(schema.application.updatedAt)).all();
-const version = (apps: App[]) => `${runState.running}:${[...working.keys()].join('.')}:${fillResult.size}:${apps.length}:${apps[0]?.updatedAt ?? ''}`;
+const version = (apps: App[]) => `${runState.running}:${[...working.keys()].join('.')}:${apps.length}:${apps[0]?.updatedAt ?? ''}`;
 const STATUS_ORDER = ['waiting_for_you', 'human_review', 'ready_to_submit', 'in_progress', 'queued', 'applied', 'duplicate'];
 const YOUR_TURN = ['waiting_for_you', 'human_review', 'ready_to_submit'];
 const FILTERS: [string, string][] = [['all', 'All'], ['waiting_for_you', 'Sign in'], ['human_review', 'Needs you'], ['ready_to_submit', 'Ready to submit'], ['applied', 'Applied'], ['queued', 'Queued'], ['duplicate', 'Skipped']];
-
-/** One sentence: what you do next with this application. */
-function whatToDo(a: App) {
-  if (a.status === 'waiting_for_you') return 'Sign in or create your account in the browser window. The bot carries on by itself once you are in.';
-  if (a.status === 'ready_to_submit') return 'Every field is filled. Check it in the browser window and click Submit yourself, then mark it submitted here.';
-  if (a.status === 'human_review') {
-    if (/couldn't find the application form/i.test(a.reason ?? '')) return 'The bot could not find the form. Open the page: it may need a click the bot did not recognise, or a sign-in.';
-    const needs = (a.reason?.match(/"[^"]+"/g) ?? []).length;
-    return `${needs ? `${needs} field${needs === 1 ? '' : 's'} need${needs === 1 ? 's' : ''} your answer. ` : ''}Finish it in the browser window and submit it yourself, then mark it submitted here.`;
-  }
-  return '';
-}
 
 const app = new Hono();
 
@@ -96,68 +85,67 @@ app.get('/', (c) => {
   const n = (s: string) => (s === 'all' ? apps.length : s === 'queued' ? queued + count('in_progress') : count(s));
   const { concurrency } = loadSettings();
 
-  return c.html(layout({ title: 'Applications', active: 'apps' }, html`
-<div class="page-head"><h1>Applications</h1></div>
-${flash(c.req.query('msg'))}
-${missing.length ? html`<div class="callout t-warn" role="status"><b>Finish Setup before adding real links.</b> You still need to ${missing.join(', ')}. <a href="/setup">Go to Setup</a></div>` : ''}
+  const stats = JSON.stringify(computeStats()).replace(/</g, '\\u003c');
+  const running = runState.running;
 
-<section class="sec" id="turn" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="turn-h">
-<div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="muted">${yourTurn.length ? `${yourTurn.length} waiting for you` : ''}</span></div>
-${yourTurn.length ? html`<ul class="turn">${yourTurn.map((a) => html`<li>
-<div class="turn-main">${badge(a.status)} <a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">at ${a.company}</span>` : ''}
-<div class="turn-what">${whatToDo(a)}</div>${fillResult.has(a.id) ? html`<div class="turn-what">${fillResult.get(a.id)}</div>` : ''}</div>
-<div class="row">${actions(a)}</div></li>`)}</ul>`
-    : html`<p class="empty" style="padding:8px 0 0">Nothing needs you right now. ${apps.length ? 'Finished forms appear here as the bot stops at each Submit button.' : 'Add job links below to begin.'}</p>`}
+  return c.html(layout({ title: 'Applications', active: 'apps' }, html`
+${flash(c.req.query('msg'))}
+${missing.length ? html`<div class="callout t-warn" role="status"><b>Finish Setup first:</b> ${missing.join(', ')}. <a href="/setup">Setup</a></div>` : ''}
+
+<div id="charts" class="charts-slot" aria-label="Activity"></div>
+<script id="stats-data" type="application/json">${raw(stats)}</script>
+<script src="/assets/charts.js" defer></script>
+
+${yourTurn.length ? html`<section class="sec" id="turn" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="turn-h">
+<div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="muted">${yourTurn.length}</span></div>
+<ul class="turn">${yourTurn.map((a) => html`<li>
+<div class="turn-main">${badge(a.status)} <a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">· ${a.company}</span>` : ''}
+<div class="turn-what">${shortWhat(a)}</div></div>
+<div class="row">${actions(a)}</div></li>`)}</ul>
+</section>` : html`<div id="turn" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}"></div>`}
+
+<section class="sec bar" aria-label="Add and run">
+<form method="post" action="/urls" class="addbar">
+<label class="sr" for="urls">Job links, one per line</label>
+<textarea id="urls" name="urls" rows="1" placeholder="Paste job links, one per line" required></textarea>
+<button class="btn">Add</button>
+</form>
+<div class="row" id="runbox" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}">
+${running
+    ? html`<span class="running">Running</span><span class="muted">${queued} left</span>`
+    : html`<form method="post" action="/run" class="inline"><button class="btn btn-primary" ${queued ? '' : 'disabled'}>Start${queued ? ` (${queued})` : ''}</button></form>`}
+<form method="post" action="/settings" class="inline" title="How many applications fill at once, each in its own tab">
+<label class="sr" for="concurrency">Parallel tabs</label>
+<select id="concurrency" name="concurrency" data-autosubmit class="mini">${Array.from({ length: MAX_CONCURRENCY }, (_, i) => i + 1).map((k) => html`<option value="${k}" ${k === concurrency ? 'selected' : ''}>${k} at a time</option>`)}</select>
+<noscript><button class="btn btn-sm">Save</button></noscript></form>
+</div>
 </section>
 
-<section class="sec" aria-labelledby="add-h">
-<form method="post" action="/urls">
-<h2 id="add-h">Add job links</h2>
-<p class="note">One per line. They wait in the queue until you click <b>Start</b> below (all of them) or <b>Run</b> on one. The bot stops at every Submit button for you.</p>
-<label class="lbl sr" for="urls">Job links</label>
-<textarea id="urls" name="urls" placeholder="https://job-boards.greenhouse.io/company/jobs/1234567" required></textarea>
-<div class="row" style="margin-top:12px"><button class="btn btn-primary">Add to queue</button></div>
-</form>
-<form method="post" action="/settings" class="row" style="margin-top:12px">
-<label for="concurrency" class="muted" style="font-size:14px">Fill</label>
-<select id="concurrency" name="concurrency" data-autosubmit style="width:auto;min-height:32px;padding:4px 8px">${Array.from({ length: MAX_CONCURRENCY }, (_, i) => i + 1).map((k) => html`<option value="${k}" ${k === concurrency ? 'selected' : ''}>${k}</option>`)}</select>
-<span class="muted" style="font-size:14px">application${concurrency === 1 ? '' : 's'} at a time, each in its own tab.${runState.running ? ' Takes effect on the next run.' : ''}</span>
-<noscript><button class="btn btn-sm">Save</button></noscript>
-</form></section>
-
 <section class="sec" id="all" data-live data-running="${busy() ? '1' : '0'}" data-version="${version(apps)}" aria-labelledby="list-h">
-<div class="sec-head"><h2 id="list-h">All applications</h2>
-<span class="muted" aria-live="polite">${runState.running
-    ? html`<span class="running">Running</span> · ${queued} still queued · this page updates by itself`
-    : queued ? html`${queued} queued <form method="post" action="/run" class="inline"><button class="btn btn-sm btn-primary" style="margin-left:8px">Start (${queued})</button></form>` : runState.last}</span></div>
+<h2 id="list-h" class="sr">Applications</h2>
 <nav class="filters" aria-label="Filter by status">${FILTERS.map(([k, l]) => html`<a href="${k === 'all' ? '/' : `/?s=${k}`}" ${filter === k ? html`aria-current="true"` : ''}>${l} <b>${n(k)}</b></a>`)}</nav>
-${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Application</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.map(row)}</tbody></table>` : html`<p class="empty">${apps.length ? 'No applications have this status.' : 'No applications yet.'}</p>`}
+${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Role</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.map(row)}</tbody></table>` : html`<p class="empty">${apps.length ? 'None with this status.' : 'No applications yet.'}</p>`}
 </section>`));
 });
+
+/** A few words: what's next for an application waiting on you. */
+function shortWhat(a: App) {
+  if (a.status === 'waiting_for_you') return 'Sign in, then the bot carries on';
+  if (a.status === 'ready_to_submit') return 'Filled in · review and submit';
+  if (/couldn't find the application form/i.test(a.reason ?? '')) return "Couldn't find the form";
+  const needs = (a.reason?.match(/"[^"]+"/g) ?? []).length;
+  return needs ? `${needs} field${needs === 1 ? '' : 's'} need you` : 'Needs a look';
+}
 
 function row(a: App) {
   return html`<tr>
 <td class="c-status">${badge(a.status)}</td>
-<td style="min-width:0">
-<a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">at ${a.company}</span>` : ''}
-<div class="app-meta">#${a.id}${isFormOpen(a.id) ? ' · open in browser' : ''}</div>
-${a.reason && a.status !== 'applied' ? html`<div class="app-reason" title="${a.reason}">${a.reason}</div>` : ''}
-${fillResult.has(a.id) ? html`<div class="app-reason">${fillResult.get(a.id)}</div>` : ''}
-${letterPeek(a.id)}
-</td>
-<td class="c-portal"><a href="${a.url}" target="_blank" rel="noopener" title="${a.url}">${portalName(a.url) ?? new URL(a.url).host}</a></td>
+<td style="min-width:0"><a class="app-title" href="/app/${a.id}">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">· ${a.company}</span>` : ''}
+${YOUR_TURN.includes(a.status) ? html`<div class="app-reason">${shortWhat(a)}</div>` : ''}</td>
+<td class="c-portal"><a href="${a.url}" target="_blank" rel="noopener" title="${a.url}">${portalName(a.url) ?? new URL(a.url).host.replace(/^(www|jobs|careers)\./, '')}</a></td>
 <td class="c-when">${ago(a.updatedAt)}</td>
 <td class="c-actions"><div class="row">${actions(a, true)}</div></td>
 </tr>`;
-}
-
-/** The cover letter the bot generated for this application, to cross-check. */
-function letterPeek(id: number) {
-  const text = read(letterPath(id));
-  if (!text) return '';
-  return html`<details class="peek"><summary>Cover letter</summary>
-<div class="peek-body"><pre class="letter">${text}</pre>
-<button type="button" class="btn btn-sm" data-copy="${text}">Copy text</button></div></details>`;
 }
 
 /** The same four verbs everywhere: Open form · Run / Run again · Mark submitted · Remove. */
@@ -165,11 +153,11 @@ function actions(a: App, compact = false) {
   const sm = compact ? ' btn-sm' : '';
   const btn = (act: string, label: string, cls = '', confirmMsg = '') =>
     html`<form class="inline" method="post" action="/app/${a.id}/${act}" ${confirmMsg ? html`data-confirm="${confirmMsg}"` : ''}><button class="btn${sm} ${cls}">${label}</button></form>`;
-  const remove = btn('dismiss', 'Remove', 'btn-ghost', 'Remove this application from the list?');
+  const remove = html`<form class="inline" method="post" action="/app/${a.id}/dismiss" data-confirm="Remove this application from the list?"><button class="btn${sm} btn-ghost btn-x" aria-label="Remove" title="Remove">✕</button></form>`;
   // Fills the empty fields on the page the tab shows now; only once the bot has handed the tab to you.
-  // Both act on the tab the bot handed to you: fill just this page, or carry on through the next pages to Submit.
+  // Carry on in the tab the bot handed to you, from the page it shows, through the next pages to Submit.
   const fillHere = working.has(a.id) ? html`<span class="muted" style="font-size:14px">${working.get(a.id)}</span>`
-    : isFormOpen(a.id) ? html`${btn('resume', 'Continue from here')}${btn('fillpage', 'Fill this page')}` : '';
+    : isFormOpen(a.id) ? btn('resume', 'Continue from here') : '';
   if (a.status === 'queued') return html`${btn('runone', 'Run', 'btn-primary')}${remove}`;
   if (a.status === 'in_progress') return '';
   if (a.status === 'applied') return '';
@@ -177,8 +165,16 @@ function actions(a: App, compact = false) {
   const open = isFormOpen(a.id)
     ? btn('show', a.status === 'waiting_for_you' ? 'Open sign-in' : 'Open form', 'btn-primary')
     : btn('requeue', 'Run again', 'btn-primary');
-  return html`${open}${fillHere}${a.status === 'waiting_for_you' ? '' : btn('applied', 'Mark submitted')}${remove}`;
+  const submitted = html`<form class="inline" method="post" action="/app/${a.id}/applied"><button class="btn${sm} btn-x" aria-label="Mark submitted" title="Mark submitted">✓</button></form>`;
+  return html`${open}${fillHere}${a.status === 'waiting_for_you' ? '' : submitted}${remove}`;
 }
+
+// The chart row: React + Recharts, bundled once at start-up (well under a second) and served as one script.
+const chartsBundle = build({
+  entryPoints: [path.join(import.meta.dirname, 'client', 'charts.tsx')], bundle: true, write: false, minify: true,
+  format: 'iife', jsx: 'automatic', target: 'es2020', define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
+}).then((r) => r.outputFiles[0].text).catch((e: Error) => { console.error(`Charts couldn't be built: ${e.message}`); return ''; });
+app.get('/assets/charts.js', async (c) => c.body(await chartsBundle, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }));
 
 app.get('/api/status', (c) => c.json({ running: busy(), version: version(allApps()) }));
 
@@ -209,30 +205,13 @@ app.post('/app/:id/:act', async (c) => {
     case 'show':
       if (!(await showForm(id))) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Run again.')}`);
       break;
-    case 'applied': updateApp(id, { status: 'applied', reason: 'Marked submitted by you', confidence: 1 }); break;
+    case 'applied': markSubmitted(id); break;
     case 'requeue': updateApp(id, { status: 'queued', reason: null, step: 0 }); startRun([id]); break;
     case 'runone': if (a.status === 'queued') startRun([id]); break;
     case 'dismiss': updateApp(id, { status: 'duplicate', reason: 'Removed by you' }); break;
-    case 'fillpage': {
-      const page = isFormOpen(id) ? openFormPage(id) : null;
-      if (!page) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Run again.')}`);
-      if (working.has(id)) break;
-      working.set(id, 'Filling this page…');
-      fillResult.delete(id);
-      fillPage(id, page)
-        .then((m) => fillResult.set(id, m))
-        .catch((e: Error) => fillResult.set(id, `Error: ${e.message.split('\n')[0]}`))
-        .finally(() => working.delete(id));
-      break;
-    }
     case 'resume': {
-      if (!isFormOpen(id)) return c.redirect(`/?msg=${encodeURIComponent('Error: that form is no longer open (the browser was closed or the app restarted). Click Run again.')}`);
-      if (working.has(id) || a.status === 'in_progress') break;
-      working.set(id, 'Continuing from this page…');
-      fillResult.delete(id);
-      continueApplication(a, makeDecider(), makeWriter())
-        .catch((e: Error) => updateApp(id, { status: 'human_review', reason: `Error: ${e.message.split('\n')[0]}` }))
-        .finally(() => working.delete(id));
+      const err = startResume(a);
+      if (err) return c.redirect(`/?msg=${encodeURIComponent(err)}`);
       break;
     }
   }
@@ -287,6 +266,54 @@ ${steps.length ? html`<table class="trace">${steps.map((s) => {
 ${s.screenshot ? html`<details><summary>Screenshot</summary><img loading="lazy" alt="Page at step ${s.step}" src="/files/${s.screenshot}"></details>` : ''}</td></tr>`;
   })}</table>` : html`<p class="empty">No steps yet. This application hasn't been run.</p>`}
 </details></section>`));
+});
+
+// ── Cover letter for a pasted job description ──────────────────────────────
+const letterPage = (v: { company?: string; jd?: string; letter?: string; note?: string; error?: string } = {}) => layout({ title: 'Cover letter', active: 'letter' }, html`
+<div class="page-head"><div><h1>Cover letter</h1><p class="note" style="margin:4px 0 0">Paste a job posting and get a cover letter written from your Setup: your template, your examples and your profile, nothing invented. The company and job title are read from the posting.</p></div></div>
+${v.error ? html`<div class="callout t-danger" role="alert">${v.error}</div>` : ''}
+<section class="sec" aria-labelledby="jd-h">
+<form method="post" action="/letter">
+<h2 id="jd-h" class="sr">Job</h2>
+<label class="lbl sr" for="jd">Job description</label>
+<textarea id="jd" name="jd" rows="16" required placeholder="Paste the whole job posting here, including the company name and job title.">${v.jd ?? ''}</textarea>
+<div class="row" style="margin-top:12px"><button class="btn btn-primary">Generate cover letter</button><span class="muted" style="font-size:14px">Takes 10–30 seconds.</span></div>
+</form></section>
+${v.letter ? html`<section class="sec" aria-labelledby="out-h">
+<div class="sec-head"><h2 id="out-h">Your cover letter</h2>${v.note ? html`<span class="muted">${v.note}</span>` : ''}</div>
+<p class="note">Edit it here if you like: Copy and Download use what's in the box.</p>
+<form method="post" action="/letter/pdf">
+<input type="hidden" name="company" value="${v.company ?? ''}">
+<label class="lbl sr" for="letter">Cover letter</label>
+<textarea id="letter" name="letter" rows="24" style="font:inherit;line-height:1.6">${v.letter}</textarea>
+<div class="row" style="margin-top:12px"><button type="button" class="btn" data-copy-from="letter">Copy text</button><button class="btn btn-primary">Download PDF</button></div>
+</form></section>` : ''}`);
+
+app.get('/letter', (c) => c.html(letterPage()));
+
+app.post('/letter', async (c) => {
+  const b = await c.req.parseBody();
+  const jd = String(b.jd ?? '').replace(/\r\n/g, '\n').trim();
+  if (!jd) return c.html(letterPage({ error: 'Paste a job description first.' }));
+  try {
+    const { profile } = loadProfile();
+    const writer = makeWriter();
+    // The company and role come from the posting itself.
+    const job = await writer.jobInfo(jd);
+    if (!job.company || !job.role) return c.html(letterPage({ jd, error: `Couldn't find the ${!job.company ? 'company name' : 'job title'} in that text. Paste the whole posting, including the company and job title.` }));
+    const r = await letterForDescription({ company: job.company, role: job.role, jd }, profile, writer, makeDecider());
+    return c.html(letterPage({ jd, company: job.company, letter: r.text, note: `${job.role} at ${job.company} · ${r.ok ? `relevance ${r.score.toFixed(1)}/4` : `relevance only ${r.score.toFixed(1)}/4 after 3 drafts: check it closely`}` }));
+  } catch (e) {
+    return c.html(letterPage({ jd, error: `Error: couldn't write the letter because ${(e as Error).message.split('\n')[0]}` }));
+  }
+});
+
+app.post('/letter/pdf', async (c) => {
+  const b = await c.req.parseBody();
+  const text = String(b.letter ?? '').replace(/\r\n/g, '\n').trim();
+  if (!text) return c.redirect('/letter');
+  const name = `Cover Letter${b.company ? ` - ${String(b.company).replace(/[^\w .&-]+/g, '').trim()}` : ''}.pdf`;
+  return c.body(new Uint8Array(await textToPdf(text)), 200, { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${name}"` });
 });
 
 // ── Setup ───────────────────────────────────────────────────────────────────

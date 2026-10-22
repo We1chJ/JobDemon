@@ -31,7 +31,7 @@ const MAX_ENTRIES = 6; // most entries the bot will add to one repeating section
 const find = (buttons: WdButton[], b: { id: RegExp; text: RegExp }) =>
   buttons.find((x) => x.footer && b.text.test(x.text)) ?? buttons.find((x) => b.text.test(x.text)) ?? buttons.find((x) => b.id.test(x.autoId));
 /** What the bot remembers across one application's pages. */
-export interface Memory {
+interface Memory {
   done: Set<string>; // "step|field key" dealt with
   decided: Set<string>; // "step|section" whose entry count is settled
   answers: Map<string, string>; // field key -> what the bot put there
@@ -39,14 +39,14 @@ export interface Memory {
   needs: string[]; // fields left for you
   filled: boolean;
 }
-export const newMemory = (): Memory => ({ done: new Set(), decided: new Set(), answers: new Map(), feedback: new Map(), needs: [], filled: false });
+const newMemory = (): Memory => ({ done: new Set(), decided: new Set(), answers: new Map(), feedback: new Map(), needs: [], filled: false });
 type Log = (op: string, target: string, detail: string) => Promise<unknown>;
 
 /**
  * One unit of work on the current Workday step: settle a repeating section's entry count, or fill one empty
- * field. Returns false when the step has nothing left to do. Used by the full run and by "Fill this page".
+ * field. Returns false when the step has nothing left to do. Used by each step of the run.
  */
-export async function workOnStep(page: Page, step: WdStep, ctx: Context, brain: Brain, mem: Memory, log: Log): Promise<boolean> {
+async function workOnStep(page: Page, step: WdStep, ctx: Context, brain: Brain, mem: Memory, log: Log): Promise<boolean> {
   const need = (label: string) => { if (!mem.needs.includes(label)) mem.needs.push(label); };
   // Repeating sections: how many entries each needs is the AI's call, from your data. Then add them.
   const section = step.sections.find((x) => !mem.decided.has(`${step.name}|${x.heading}`));
@@ -164,7 +164,7 @@ export async function runWorkday(s: Session, decider: Decider, writer: Writer) {
       // Tries: 0 = first click; 1 = Workday refused, answer its flagged fields again; 2 = second click; 3 = give up.
       const tries = nextTries.get(tag) ?? 0;
       const flagged = step.fields.filter((f) => f.error);
-      if (tries === 1) saveSnapshot(s.traceDir, ++snaps, step); // what Workday showed when it refused the step
+      if (tries === 1 || tries >= 3) saveSnapshot(s.traceDir, ++snaps, step); // what Workday showed each time it refused the step
       if (tries === 1 && flagged.length) {
         for (const f of flagged) { feedback.set(f.key, f.error!); done.delete(`${step.name}|${f.key}`); }
         nextTries.set(tag, 2);
@@ -178,7 +178,14 @@ export async function runWorkday(s: Session, decider: Decider, writer: Writer) {
       nextTries.set(tag, tries + 1);
       await s.page.locator(`[data-jdw-b="${next.id}"]`).click({ timeout: 5000 });
       await s.page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-      await s.page.waitForTimeout(800);
+      // Saving can take a while: wait until the page moves on or shows an error before judging it (up to 20 s).
+      for (let waited = 0; waited < 20000; waited += 1000) {
+        await s.page.waitForTimeout(1000);
+        const now = await readStep(s.page).catch(() => null);
+        if (!now) continue; // between pages
+        const moved = now.name !== step.name || now.progress?.at !== step.progress?.at || now.signIn;
+        if (moved || now.errors.length || now.fields.some((f) => f.error)) break;
+      }
       lastStartAt = Date.now();
       s.log('NEXT', next.text, `Finished "${step.name || 'step'}"`, await s.shot('next'));
     }

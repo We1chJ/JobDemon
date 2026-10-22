@@ -1,6 +1,11 @@
 // Presentation layer for the local control panel: a plain, document-like tool. System font, one column,
 // hairline rules, text status labels. No cards, shadows, or decorative icons.
+import fs from 'node:fs';
+import path from 'node:path';
 import { html, raw } from 'hono/html';
+
+/** The JobDemon logo (assets/logo.svg), used as the browser-tab icon. */
+const LOGO = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'assets', 'logo.svg'), 'utf8');
 
 type Html = ReturnType<typeof html>;
 
@@ -47,6 +52,7 @@ const CSS = `
 :root{
   --bg:#FFFFFF;--fg:#1A1A1A;--muted:#5F5F5F;--rule:#DCDCDC;--rule-strong:#B4B4B4;--inset:#F4F4F2;
   --link:#0B57D0;--ok:#1B7F3B;--warn:#9A5B00;--info:#0B57D0;--violet:#6B3FA0;--danger:#B3261E;--neutral:#5F5F5F;
+  --chart-neutral:#A3A3A3;--chart-bar:#3F3F3F;--h0:#EFEFEC;--h1:#C6E9CF;--h2:#8FD19E;--h3:#4CAF6A;--h4:#1B7F3B;
   --font:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   color-scheme:light dark;
@@ -54,6 +60,7 @@ const CSS = `
 @media (prefers-color-scheme:dark){:root{
   --bg:#151515;--fg:#E8E8E8;--muted:#9C9C9C;--rule:#2F2F2F;--rule-strong:#4C4C4C;--inset:#1F1F1F;
   --link:#8AB4F8;--ok:#5DBB73;--warn:#E0A24A;--info:#8AB4F8;--violet:#C3A5F0;--danger:#F28B82;--neutral:#9C9C9C;
+  --chart-neutral:#6B6B6B;--chart-bar:#D4D4D4;--h0:#232323;--h1:#12391F;--h2:#1D5C31;--h3:#2E8A4A;--h4:#5DBB73;
 }}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -101,6 +108,7 @@ main{max-width:960px;margin:0 auto;padding:8px 20px 64px}
 .btn-ghost{border-color:transparent;color:var(--muted)}
 .btn-ghost:hover{color:var(--fg);background:var(--inset)}
 .btn-sm{min-height:30px;padding:0 10px;font-size:13px}
+.btn-x{min-width:30px;padding:0 8px;font-size:15px;line-height:1}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
 .btn[aria-busy=true]{opacity:.6;cursor:progress}
 @media (max-width:640px){.btn{min-height:44px}.btn-sm{min-height:40px}}
@@ -148,6 +156,37 @@ input[type=file]::file-selector-button{font:500 14px var(--font);border:1px soli
   .c-actions{text-align:left;margin-top:6px}.c-actions .row{justify-content:flex-start}
 }
 .empty{color:var(--muted);padding:24px 0}
+
+/* chart row (shadcn-style cards) */
+.charts-slot{min-height:182px;margin-top:20px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.cc{border:1px solid var(--rule);border-radius:10px;padding:12px 14px 10px;background:var(--bg);display:flex;flex-direction:column;gap:8px;min-width:0;overflow:hidden}
+.cc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cc-title{font-size:13px;color:var(--muted);flex-basis:100%}
+.cc-value{font-size:24px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.cc-sub{font-size:12px;color:var(--muted)}
+.cc-body{min-height:110px;display:flex;align-items:center}
+.cc-body>*{flex:1;min-width:0}
+.heat{width:100%;height:auto;max-height:110px}
+.heat .h0{fill:var(--h0)}.heat .h1{fill:var(--h1)}.heat .h2{fill:var(--h2)}.heat .h3{fill:var(--h3)}.heat .h4{fill:var(--h4)}
+.donut{display:flex;align-items:center;gap:10px}
+.donut>div{flex:none}
+.legend{list-style:none;margin:0;padding:0;font-size:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:2px;flex:1;min-width:0}
+.legend li{display:flex;align-items:center;gap:6px;white-space:nowrap;min-width:0}
+.legend i,.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none}
+.legend span{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.legend b{margin-left:auto;padding-left:6px;font-weight:500;font-variant-numeric:tabular-nums}
+.tip{background:var(--bg);border:1px solid var(--rule-strong);border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 4px 12px rgb(0 0 0/.12);min-width:120px}
+.tip-l{color:var(--muted);margin-bottom:2px}
+.tip-r{display:flex;align-items:center;gap:6px}.tip-r b{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}
+.recharts-surface:focus,.recharts-wrapper:focus,.recharts-sector:focus{outline:none}
+
+/* add + run bar */
+.sec.bar{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;padding:16px 0}
+.addbar{display:flex;gap:8px;flex:1;min-width:260px;align-items:flex-start}
+.addbar textarea{min-height:36px;height:36px;padding:7px 10px;resize:vertical;flex:1}
+.addbar textarea:focus{height:96px}
+select.mini{width:auto;min-height:36px;padding:4px 8px;font-size:14px}
 
 /* your turn */
 .turn{list-style:none;margin:0;padding:0}
@@ -278,9 +317,10 @@ if (sf) {
 document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('[data-autosubmit]')) e.target.form.requestSubmit(); });
 // Copy buttons.
 document.addEventListener('click', async (e) => {
-  const b = e.target.closest && e.target.closest('[data-copy]');
+  const b = e.target.closest && (e.target.closest('[data-copy]') || e.target.closest('[data-copy-from]'));
   if (!b) return;
-  try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; } catch { b.textContent = 'Copy failed'; }
+  const text = b.dataset.copyFrom ? document.getElementById(b.dataset.copyFrom).value : b.dataset.copy;
+  try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch { b.textContent = 'Copy failed'; }
   setTimeout(() => { b.textContent = 'Copy text'; }, 1500);
 });
 // Typing an "Other" answer anywhere selects its choice.
@@ -336,16 +376,17 @@ if (nav) {
 }
 `;
 
-export function layout(opts: { title: string; active: 'apps' | 'setup' | '' }, body: Html | Html[] | string) {
+export function layout(opts: { title: string; active: 'apps' | 'setup' | 'letter' | '' }, body: Html | Html[] | string) {
   return html`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${opts.title} · JobDemon</title>
-<link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#1A1A1A"/><text x="12" y="17.5" font-family="system-ui,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">J</text></svg>')}">
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(LOGO)}">
 <style>${raw(CSS)}</style></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="top-in">
 <a class="brand" href="/">JobDemon</a>
 <nav class="nav" aria-label="Main">
 <a href="/" ${opts.active === 'apps' ? raw('aria-current="page"') : ''}>Applications</a>
+<a href="/letter" ${opts.active === 'letter' ? raw('aria-current="page"') : ''}>Cover letter</a>
 <a href="/setup" ${opts.active === 'setup' ? raw('aria-current="page"') : ''}>Setup</a>
 </nav>
 <span class="mode" title="The bot fills forms but never submits them">Fills forms, never submits</span>

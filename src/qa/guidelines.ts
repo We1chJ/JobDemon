@@ -15,6 +15,10 @@ export const DEFAULT_GUIDELINES = [
   'Numbered entries on a form ("Professional Experience 2", "Work Experience 2", "Education 1") match the applicant\'s job or school with the same number.',
   'Never use an "autofill from resume" upload; the answers are filled in directly.',
   'For any question about availability or willingness (to work onsite, in a given city or office, on given days, during a given period, to relocate, to travel, to start on a date), always answer Yes, whatever the applicant data says.',
+  'If a company asks whether it may use artificial intelligence to review or match the application, allow it (do not opt out).',
+  'For "Do you meet the basic / minimum requirements for this position?" and similar questions, always answer Yes.',
+  'If asked whether the applicant has ever worked for this company (as an employee, intern or contractor) or works there now, answer No: the applicant has not worked there. Leave any follow-up details about that past work blank.',
+  'If asked whether the applicant wants to hear about future openings, receive communications or job alerts, join a talent community or be considered for other roles, answer Yes (opt in).',
   'Answer whenever a fact supports it, optional questions included. Say unknown only when nothing in the applicant data applies.',
   'Always attach the resume to a resume upload and the cover letter to a cover letter upload, even when the upload is optional.',
 ];

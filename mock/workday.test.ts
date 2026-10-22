@@ -13,8 +13,12 @@ test('dates in every format a profile may hold', () => {
   assert.deepEqual(parseDate('2024'), { year: '2024' });
 });
 
+test('"present" is today (a current job\'s end date, when a form insists on one)', () => {
+  assert.deepEqual(parseDate('present', new Date(2026, 9, 20)), { year: '2026', month: '10', day: '20' });
+  assert.deepEqual(parseDate('Current', new Date(2026, 0, 5)), { year: '2026', month: '01', day: '05' });
+});
+
 test('things that are not dates are refused', () => {
-  assert.equal(parseDate('present'), null);
   assert.equal(parseDate('2 weeks'), null);
   assert.equal(parseDate(''), null);
 });

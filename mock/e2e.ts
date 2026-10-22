@@ -68,7 +68,9 @@ try {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   check('cover letter uses your template: header, date, company greeting, fixed opening, sign-off',
     letter.startsWith('Jane Doe\njane@example.com\n\n' + today + '\n\nTo the Mockco Selection Committee,\n\n' + OPENING + '\n\n') && letter.endsWith('Sincerely,\n\nJane Doe') && !letter.includes('OtherCo'));
-  check('the form tab shows the generated cover letter in a corner panel', (await page.locator('#jobdemon-letter pre').innerText()).includes(OPENING) && (await page.locator('#jobdemon-letter pre').innerText()) === letter);
+  await page.locator('#jobdemon-panel pre').waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
+  const panelLetter = await page.locator('#jobdemon-panel pre').textContent().catch(() => '');
+  check('the form tab\'s JobDemon widget carries the generated cover letter', !!panelLetter && panelLetter === letter);
   check('cover letter + paragraph generated', (await val('#cover_letter')).includes('Mockco') && (await val('#why')).length > 20);
   check('EEO declined, not guessed', (await page.locator('#gender').evaluate((s: HTMLSelectElement) => s.options[s.selectedIndex].text)) === 'Decline To Self Identify');
   check('privacy statement checkbox ticked', await page.locator('#privacy').isChecked());
@@ -192,18 +194,14 @@ try {
   check('Standard markup: native <select> declined for a demographic question', !!p15 && (await p15.locator('#sex').evaluate((s: HTMLSelectElement) => s.options[s.selectedIndex].text)) === 'Prefer not to say');
   check('Standard markup: open-ended answer written', !!p15 && (await v15('#motive')).length > 20);
 
-  // "Fill this page": fills what is empty on the page the tab shows now, leaves the rest, never navigates.
-  const { fillPage } = await import('../src/portals/fillPage.js');
-  const p3 = openFormPage(a3.id)!;
-  await p3.fill('#first_name', '');
-  await p3.fill('#last_name', 'Typed-By-You');
-  const m3 = await fillPage(a3.id, p3);
-  check('Fill this page (generic): refills an empty field, keeps what you typed, reports what is still missing', (await p3.locator('#first_name').inputValue()) === 'Jane' && (await p3.locator('#last_name').inputValue()) === 'Typed-By-You' && /clearance/i.test(m3), m3);
   const p14 = openFormPage(a14.id)!;
-  await p14.fill('#legalNameSection_firstName', '');
-  const url14 = p14.url();
-  const m14 = await fillPage(a14.id, p14);
-  check('Fill this page (Workday): refills an empty field on the current step and stays on it', (await p14.locator('#legalNameSection_firstName').inputValue()) === 'Jane' && p14.url() === url14 && await p14.locator('[data-name="My Information"]').isVisible(), m14);
+  // A careers site that hands the application on to Workday (like Salesforce): the Workday flow takes over there.
+  enqueue([u(16)]);
+  await processQueue();
+  const a16 = get(u(16)), p16 = openFormPage(a16.id);
+  const logs16 = db.select().from(schema.stepLog).all().filter((s) => s.applicationId === a16.id);
+  check('careers site handing on to Workday: the Workday flow takes over in the new tab and reaches Submit', logs16.some((s) => /Workday flow takes over/.test(s.detail ?? '')) && logs16.some((s) => s.detail === 'Portal: Workday (Workday flow)') && a16.status === 'ready_to_submit' && !!p16 && await p16.locator('#wsubmit').isVisible(), `${a16.status}: ${a16.reason}`);
+
   // "Continue from here": you fix what stopped the run by hand, then the bot carries on to Submit in the same tab.
   const { continueApplication } = await import('../src/portals/index.js');
   const { makeDecider } = await import('../src/decider/index.js');
@@ -214,6 +212,22 @@ try {
   const nextsAfter = db.select().from(schema.stepLog).all().filter((s) => s.applicationId === c14.id && s.op === 'NEXT').length - nexts14;
   check('Continue from here: carries on from the page you fixed, through every step, to Submit', c14.status === 'ready_to_submit' && !!q14 && await q14.locator('#wsubmit').isVisible() && nextsAfter === 4 && (await q14.locator('#employeeId').inputValue()) === 'E-12345', `${c14.status}: ${c14.reason} (${nextsAfter} Next clicks)`);
   check('Continue from here: keeps the company and role read at the start', c14.company === a14.company && c14.role === a14.role);
+  // The JobDemon widget in a handed-over tab: its buttons act without going back to the control panel.
+  const { working } = await import('../src/panel.js');
+  const w14 = q14!.locator('#jobdemon-panel');
+  await w14.locator('button:has-text("Mark submitted")').waitFor({ timeout: 8000 }).catch(() => {});
+  check('widget: shows the status and its actions in the form tab', (await w14.locator('.s').innerText().catch(() => '')).startsWith('Ready to submit') && await w14.locator('button:has-text("Continue from here")').isVisible().catch(() => false));
+  await w14.locator('button:has-text("Mark submitted")').click();
+  for (let i = 0; i < 20 && (get(u(14)).status !== 'applied' || isFormOpen(c14.id)); i++) await new Promise((r) => setTimeout(r, 250));
+  check('widget: "Mark submitted" marks it submitted and closes its tab, no pop-up', get(u(14)).status === 'applied' && !isFormOpen(c14.id) && q14!.isClosed(), get(u(14)).status);
+  const p3 = openFormPage(a3.id)!;
+  const w3 = p3.locator('#jobdemon-panel');
+  await w3.locator('button:has-text("Continue from here")').waitFor({ timeout: 8000 }).catch(() => {});
+  await w3.locator('button:has-text("Continue from here")').click().catch(() => {});
+  for (let i = 0; i < 10 && !working.has(a3.id); i++) await new Promise((r) => setTimeout(r, 200));
+  for (let i = 0; i < 120 && working.has(a3.id); i++) await new Promise((r) => setTimeout(r, 500));
+  const resumed3 = db.select().from(schema.stepLog).all().some((s) => s.applicationId === a3.id && /^Continuing from the page/.test(s.detail ?? ''));
+  check('widget: "Continue from here" carries on in that tab and hands it back', resumed3 && get(u(3)).status === 'human_review' && isFormOpen(a3.id), `${get(u(3)).status}: ${get(u(3)).reason}`);
   check('Workday: Submit never clicked', stats.posts === 0 && submissions.length === 0);
 
   // Sign-in walls: the bot waits for you, then takes over; the sign-in is remembered.

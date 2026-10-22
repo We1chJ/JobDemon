@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 2 104 120" width="208" height="240" role="img" aria-label="JobDemon logo: a grinning red devil holding up a resume">
+  <!-- horns: short and rounded -->
+  <path d="M28 36 C20 28 18 16 22 6 C28 16 36 22 46 25 Z" fill="#1F1A1D"/>
+  <path d="M92 36 C100 28 102 16 98 6 C92 16 84 22 74 25 Z" fill="#1F1A1D"/>
+  <!-- face -->
+  <circle cx="60" cy="58" r="40" fill="#D7263D"/>
+  <!-- brows: a cheeky tilt -->
+  <path d="M38 45 L52 51" stroke="#1F1A1D" stroke-width="5" stroke-linecap="round"/>
+  <path d="M82 45 L68 51" stroke="#1F1A1D" stroke-width="5" stroke-linecap="round"/>
+  <!-- eyes with a little shine -->
+  <ellipse cx="46" cy="59" rx="5" ry="6" fill="#1F1A1D"/>
+  <ellipse cx="74" cy="59" rx="5" ry="6" fill="#1F1A1D"/>
+  <circle cx="47.6" cy="56.8" r="1.6" fill="#FFFFFF"/>
+  <circle cx="75.6" cy="56.8" r="1.6" fill="#FFFFFF"/>
+  <!-- mischievous grin -->
+  <path d="M40 71 Q60 90 80 71 Q60 79 40 71 Z" fill="#1F1A1D"/>
+  <!-- the resume, held up -->
+  <rect x="36" y="82" width="48" height="36" rx="3" fill="#FFFFFF" stroke="#1F1A1D" stroke-width="1.5"/>
+  <path d="M44 92 H76 M44 100 H72 M44 108 H66" stroke="#D7263D" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- hands -->
+  <ellipse cx="34" cy="100" rx="8" ry="7" fill="#D7263D"/>
+  <ellipse cx="86" cy="100" rx="8" ry="7" fill="#D7263D"/>
+</svg>

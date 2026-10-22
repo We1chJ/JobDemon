@@ -105,10 +105,17 @@ async function choose(f: WdField, d: WidgetDeps): Promise<Result> {
     const on = picked.includes(k);
     if (f.kind === 'radio' && !on) continue;
     const el = ctrl(d, f, k);
-    // Real inputs are set directly; custom ones (role=checkbox / role=radio) are clicked until their state matches.
-    const isInput = await el.evaluate((n) => n.tagName === 'INPUT');
-    if (isInput) await el.setChecked(on, { timeout: TIMEOUT, force: true });
-    else if ((await el.getAttribute('aria-checked')) !== String(on)) await el.click({ timeout: TIMEOUT, force: true });
+    // Set it, then make sure it took: some sites ignore clicks on the control itself and only react to its label.
+    const isOn = () => el.evaluate((n) => (n as HTMLInputElement).checked === true || n.getAttribute('aria-checked') === 'true');
+    if ((await isOn()) === on) continue;
+    if (await el.evaluate((n) => n.tagName === 'INPUT')) await el.setChecked(on, { timeout: TIMEOUT, force: true }).catch(() => {});
+    else await el.click({ timeout: TIMEOUT, force: true }).catch(() => {});
+    if ((await isOn()) !== on) {
+      const label = await el.evaluate((n) => { const l = (n.id && document.querySelector(`label[for="${CSS.escape(n.id)}"]`)) || n.closest('label'); if (l) l.setAttribute('data-jdw-l', '1'); return !!l; });
+      if (label) { await d.page.locator('[data-jdw-l="1"]').first().click({ timeout: TIMEOUT, force: true }).catch(() => {}); await d.page.locator('[data-jdw-l="1"]').evaluateAll((ls) => ls.forEach((l) => l.removeAttribute('data-jdw-l'))); }
+      if ((await isOn()) !== on) await el.evaluate((n) => (n as HTMLElement).click()); // last resort: a script click
+    }
+    if ((await isOn()) !== on) return notDone(q, unanswered(q, `couldn't ${on ? 'select' : 'clear'} "${candidates[k]}" on the page`));
   }
   if (f.kind === 'checkbox') return filled(picked.length ? 'ticked' : `left unticked: ${a.because}`, picked.length ? 'checked' : '');
   return filled(a.because, picked.map((i) => candidates[i]).join(', '));
@@ -126,7 +133,9 @@ async function pick(f: WdField, d: WidgetDeps): Promise<Result> {
   const stale = new Set(await visibleOptions(d.page, f));
   const fresh = async () => { const all = await visibleOptions(d.page, f); return { all, list: all.filter((o) => !stale.has(o)) }; };
   await openPopup(d.page, el);
+  // Lists often load their options a moment after opening: give them up to 3 seconds to appear.
   let shown = await fresh();
+  for (let i = 0; i < 6 && !shown.list.length; i++) { await settle(d.page, 500); shown = await fresh(); }
   let options = shown.list;
   const chosen: string[] = [];
   const pickFrom = async (list: string[]) => {
@@ -147,8 +156,11 @@ async function pick(f: WdField, d: WidgetDeps): Promise<Result> {
       break;
     }
     if (await shows(d, f)) break;
+    const before = options.join('|');
     shown = await fresh();
     options = shown.list; // a sub-list, or nothing once the pick is made
+    // The same list again means the pick didn't take (or another field's list is in the way): stop rather than repeat it.
+    if (options.join('|') === before) { await d.page.keyboard.press('Escape'); return notDone(q, unanswered(q, `picking "${chosen[chosen.length - 1]}" didn't take: the list stayed the same`)); }
   }
 
   if (!browse) {
@@ -176,9 +188,10 @@ async function pick(f: WdField, d: WidgetDeps): Promise<Result> {
   return filled(`chose "${chosen.join(' > ')}"`, now);
 }
 
-/** Read a date out of a fact's text: 2028-05-15, 2028-05, 05/2028, 05/15/2028, May 2028, 2028. */
-export function parseDate(s: string): { month?: string; day?: string; year?: string } | null {
+/** Read a date out of a fact's text: 2028-05-15, 2028-05, 05/2028, 05/15/2028, May 2028, 2028, or "present" (= today). */
+export function parseDate(s: string, today = new Date()): { month?: string; day?: string; year?: string } | null {
   const t = s.trim();
+  if (/^(present|current|now|today)$/i.test(t)) return { year: String(today.getFullYear()), month: String(today.getMonth() + 1).padStart(2, '0'), day: String(today.getDate()).padStart(2, '0') };
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   const pad = (n: number) => String(n).padStart(2, '0');
   let m: RegExpMatchArray | null;
@@ -208,6 +221,8 @@ async function date(f: WdField, d: WidgetDeps): Promise<Result> {
 
 /** Uploads: the applicant's files are the candidates. The cover letter is written on demand. */
 async function upload(f: WdField, d: WidgetDeps): Promise<Result> {
+  // A file is already there (an earlier run, a retry, or Workday's own autofill): never upload a second copy.
+  if (f.value || (await shows(d, f))) return { status: 'skipped', detail: `already attached: ${f.value || 'a file'}` };
   const q = question(f, d, { candidates: d.ctx.files.map((x) => x.label), attach: true });
   const a = await answerQuestion(q, d.ctx, d.brain);
   if (a.kind !== 'pick') return notDone(q, a);

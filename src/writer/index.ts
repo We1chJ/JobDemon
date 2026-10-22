@@ -11,7 +11,16 @@ export interface GenerateInput {
   question?: string; // for paragraph answers
   feedback?: string; // set on regeneration after a low quality score
 }
-export interface Writer { generate(input: GenerateInput): Promise<string> }
+export interface Writer {
+  generate(input: GenerateInput): Promise<string>;
+  /** The company and role named in a pasted job description. */
+  jobInfo(jd: string): Promise<{ company: string; role: string }>;
+}
+
+const JOB_INFO_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['company', 'role'],
+  properties: { company: { type: 'string' }, role: { type: 'string' } },
+};
 
 const SYSTEM = `You write job application text for the applicant described in PROFILE.
 Hard rules:
@@ -50,6 +59,17 @@ class OpenAIWriter implements Writer {
     if (!text) throw new Error('Writer returned empty text');
     return text;
   }
+  async jobInfo(jd: string) {
+    const r = await this.client.chat.completions.create({
+      model: config.openaiModel,
+      messages: [
+        { role: 'system', content: 'From the job posting the user sends, give the hiring company\'s name and the job title exactly as the posting states them. Use "" for anything the posting does not state.' },
+        { role: 'user', content: jd.slice(0, 12000) },
+      ],
+      response_format: { type: 'json_schema', json_schema: { name: 'job', strict: true, schema: JOB_INFO_SCHEMA } },
+    });
+    return JSON.parse(r.choices[0]?.message?.content || '{"company":"","role":""}') as { company: string; role: string };
+  }
 }
 
 class FakeWriter implements Writer {
@@ -58,6 +78,9 @@ class FakeWriter implements Writer {
     return i.kind === 'cover_letter'
       ? `Dear ${i.company} team,\n\nI am applying for the ${i.role} role. ${String(i.profile.facts.summary ?? '')}\n\n${i.profile.fields.full_name ?? ''}`
       : `${String(i.profile.facts.summary ?? '')} (answer to: ${i.question})`;
+  }
+  async jobInfo(jd: string) {
+    return { company: jd.match(/\b(?:[Aa]t|[Jj]oin) ([A-Z][\w&.-]+)/)?.[1] ?? '', role: jd.match(/^(.+?)\n/)?.[1]?.trim() ?? '' };
   }
 }
 

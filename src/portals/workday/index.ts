@@ -3,7 +3,7 @@
 import type { Page } from 'playwright';
 
 export const isWorkdayUrl = (url: string) => {
-  try { return /(^|\.)myworkdayjobs\.com$|(^|\.)myworkdaysite\.com$/.test(new URL(url).hostname); } catch { return false; }
+  try { return /(^|\.)(myworkdayjobs|myworkdaysite|myworkday)\.com$/.test(new URL(url).hostname); } catch { return false; }
 };
 /** By address, or (on a company's own careers site) by Workday's page markers. */
 export async function isWorkdayPage(page: Page) {
