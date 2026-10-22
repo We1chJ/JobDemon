@@ -76,8 +76,9 @@ code,pre,.mono{font-family:var(--mono);font-size:13px}
 
 /* header */
 .top{border-bottom:1px solid var(--rule)}
-.top-in{max-width:960px;margin:0 auto;padding:14px 20px;display:flex;align-items:baseline;gap:20px;flex-wrap:wrap}
-.brand{font-weight:700;color:var(--fg);text-decoration:none}
+.top-in{max-width:960px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.brand{font-weight:700;color:var(--fg);text-decoration:none;display:inline-flex;align-items:center;gap:8px;align-self:center}
+.brand img{display:block;height:30px;width:auto}
 .nav{display:flex;gap:16px}
 .nav a{color:var(--muted);text-decoration:none;padding:4px 0}
 .nav a:hover{color:var(--fg)}
@@ -383,7 +384,7 @@ export function layout(opts: { title: string; active: 'apps' | 'setup' | 'letter
 <style>${raw(CSS)}</style></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="top-in">
-<a class="brand" href="/">JobDemon</a>
+<a class="brand" href="/"><img src="data:image/svg+xml,${encodeURIComponent(LOGO)}" alt="" width="26" height="30">JobDemon</a>
 <nav class="nav" aria-label="Main">
 <a href="/" ${opts.active === 'apps' ? raw('aria-current="page"') : ''}>Applications</a>
 <a href="/letter" ${opts.active === 'letter' ? raw('aria-current="page"') : ''}>Cover letter</a>

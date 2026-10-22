@@ -17,6 +17,10 @@ import { Session, pageErrors, prepareJob } from './session.js';
 const MAX_NAV_CLICKS = 25;
 // Buttons the bot must never click. It stops at them and leaves the form for you to submit.
 const FINAL_WORDS = /submit|send|apply|finish|complete|confirm/i;
+// Buttons that send you to another account (autofill from a profile, apply with LinkedIn...): never the way into the form.
+const ELSEWHERE = /autofill|auto-fill|apply with|sign (in|up) with|log ?in with|continue with|import (from|my)|quick apply|use my (profile|resume)/i;
+// Judged on the button's own text only (its label also carries nearby text, e.g. the other buttons in a pop-up).
+const goesElsewhere = (e: ElementInfo) => ELSEWHERE.test(e.label.split(' / ')[0]);
 
 function isFinalButton(el: ElementInfo, jevSaysSubmit: number) {
   if (jevSaysSubmit >= 0.3 || FINAL_WORDS.test(el.label)) return true;
@@ -126,7 +130,9 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
 
       // No empty fields on this page. Work out where we are and what (if anything) moves the application forward.
       const fieldsHere = elements.filter((e) => isFillable(e) || isFileInput(e));
-      const filledHere = fieldsHere.filter((e) => handledHere().has(e.key)).length;
+      // Filled = handled this run, or already answered (by an earlier run or by you: "Continue from here" on a filled form).
+      const filledHere = fieldsHere.filter((e) => handledHere().has(e.key) || !!e.value).length;
+      const filledAny = handledTotal() > 0 || filledHere > 0;
       if (!fieldsHere.length) {
         // Company career pages often embed the real form (e.g. Greenhouse) in an iframe: open it directly.
         const embedded = await findEmbeddedForm(s.page);
@@ -150,11 +156,12 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
       let nav: Awaited<ReturnType<Decider['navigate']>> = { stage: 'done', target: null, confidence: 0 };
       try {
         const tried = [...visited].filter((k) => k.startsWith(`${stepId}|`)).map((k) => k.slice(stepId.length + 1));
-        nav = await decider.navigate({ url: s.page.url(), elements, filledHere, filledTotal: handledTotal(), pageText: await s.page.innerText('body').catch(() => ''), tried, notes: here?.jevNotes });
+        const ways = elements.filter((e) => !goesElsewhere(e));
+        nav = await decider.navigate({ url: s.page.url(), elements: ways, filledHere, filledTotal: Math.max(handledTotal(), filledHere), pageText: await s.page.innerText('body').catch(() => ''), tried, notes: here?.jevNotes });
       } catch (e) {
         s.log('NOTE', undefined, `Decider error while choosing where to go next: ${(e as Error).message.split('\n')[0]}`);
       }
-      const target = nav.target === null ? undefined : elements.find((e) => e.idx === nav.target && !isFillable(e) && !isFileInput(e));
+      const target = nav.target === null ? undefined : elements.find((e) => e.idx === nav.target && !isFillable(e) && !isFileInput(e) && !goesElsewhere(e));
       s.log('PAGE', target?.label, `Page looks like: ${nav.stage}`);
       if (nav.stage === 'account') {
         if (await s.waitForSignIn('This site wants you to sign in or create an account')) continue;
@@ -165,7 +172,7 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
       // Before anything is filled, clicking into the application ("Apply", an "Application" tab) is safe.
       // After that, a button that looks like submitting is where the bot stops: only real "Next" steps are clicked.
       // (A page with no fields after filling could be a review page, so it gets the same check.)
-      if (handledTotal() > 0) {
+      if (filledAny) {
         const isFinal = await decider.isSubmitControl(target, elements).then((p) => isFinalButton(target, p)).catch(() => true);
         if (isFinal || nav.stage !== 'form_step') return await finish(target, elements);
       }
@@ -180,7 +187,7 @@ export async function runGeneric(s: Session, decider: Decider, writer: Writer, s
         return await finish(undefined, elements);
       }
       visited.add(navKey);
-      if (handledTotal() > 0) nextClickedOn.add(stepId);
+      if (filledAny) nextClickedOn.add(stepId);
       try {
         const newTab = s.tabs.waitForTab(3000); // links with target=_blank
         await exec.click(s.page, target);

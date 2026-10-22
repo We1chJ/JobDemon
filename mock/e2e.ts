@@ -195,6 +195,13 @@ try {
   check('Standard markup: open-ended answer written', !!p15 && (await v15('#motive')).length > 20);
 
   const p14 = openFormPage(a14.id)!;
+  // A careers page with its own job search above an embedded form: the search boxes are not the application.
+  enqueue([u(17)]);
+  await processQueue();
+  const a17 = get(u(17)), p17 = openFormPage(a17.id);
+  const logs17 = db.select().from(schema.stepLog).all().filter((s) => s.applicationId === a17.id);
+  check('careers page with a job search: skips the search boxes and fills the embedded application', a17.status === 'ready_to_submit' && !!p17 && p17.url().includes('/embed/job_app?for=17') && (await p17.locator('#first_name').inputValue()) === 'Jane' && !logs17.some((s) => /Keywords|Location:/.test(s.target ?? '')), `${a17.status}: ${a17.reason}`);
+
   // A careers site that hands the application on to Workday (like Salesforce): the Workday flow takes over there.
   enqueue([u(16)]);
   await processQueue();

@@ -60,6 +60,9 @@ const OBSERVE_JS = String.raw`(() => {
     // Bot traps ("This input is for robots only, do not enter if you're human"): never touch them.
     // ("Leave blank if none" on a real question is NOT a trap: only "leave THIS field blank" wording counts.)
     if (/for robots only|if you.?re (a )?human|leave this (field|input|box) (blank|empty)|honeypot/i.test(labelOf(el))) continue;
+    // The site's own job search and filters (a GET search form, a search region, "Filter jobs") are not the application.
+    const fillableTag = el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.getAttribute('role') === 'combobox';
+    if (fillableTag && (el.closest('form[method="get" i], [role=search]') || /\bfilter (jobs|roles|positions|openings|results)\b|\bsearch (jobs|roles|positions|openings)\b|search job title/i.test(labelOf(el)))) continue;
     if (groupOf.has(el)) {
       const btns = groupOf.get(el);
       const idx = out.length;
@@ -202,7 +205,7 @@ export async function findEmbeddedForm(page: Page): Promise<string | null> {
     const ats = /greenhouse|lever\.co|ashbyhq|myworkdayjobs|workday|smartrecruiters|icims|jobvite|bamboohr|workable|\/embed\/|job_app|\/apply/i;
     for (const f of document.querySelectorAll('iframe')) {
       const r = f.getBoundingClientRect();
-      if (f.src && ats.test(f.src) && r.width > 200 && r.height > 200) return f.src;
+      if (f.src && ats.test(f.src) && r.width > 120 && r.height > 200) return f.src; // narrow windows squeeze the frame's width
     }
     return null;
   })()`)) as string | null;
