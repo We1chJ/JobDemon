@@ -411,7 +411,8 @@ export function mockApp() {
 <div class="application-field"><ul><li><label><input type="radio" name="cards[q1]" value="Yes"><span>Yes</span></label></li><li><label><input type="radio" name="cards[q1]" value="No"><span>No</span></label></li></ul></div></li></ul>`)));
   // 8: company careers page embedding the form in an iframe.
   app.get('/jobs/8', (c) => c.html(`<html><head><title>Job Application for ${ROLES['8']} at Mockco</title></head><body><h1>Careers at Mockco</h1><iframe src="/embed/job_app?for=8" width="900" height="1400"></iframe></body></html>`));
-  app.get('/embed/job_app', (c) => c.html(form(c.req.query('for') ?? '8')));
+  // Like Greenhouse's job boards, job 17's embedded application form uses method="get" (it's sent by script).
+  app.get('/embed/job_app', (c) => { const job = c.req.query('for') ?? '8'; const page = form(job); return c.html(job === '17' ? page.replace('method="post"', 'method="get"') : page); });
   // 10 + 11: behind a sign-in wall (Workday / iCIMS style). Signing in once works for both.
   for (const job of ['10', '11']) {
     app.get(`/jobs/${job}`, (c) => (getCookie(c, 'mock_session') ? c.html(form(job)) : c.html(signIn(job))));

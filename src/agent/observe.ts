@@ -43,6 +43,15 @@ const OBSERVE_JS = String.raw`(() => {
     return clean(parts.join(' / '));
   };
   document.querySelectorAll('[data-jd-idx],[data-jd-opt],[data-jd-groupbtn]').forEach((e) => { e.removeAttribute('data-jd-idx'); e.removeAttribute('data-jd-opt'); e.removeAttribute('data-jd-groupbtn'); });
+  // A site search: a search region, or a small GET form with a search box. (Application forms may use GET too,
+  // e.g. Greenhouse's, so GET alone doesn't make a form a search.)
+  const inSearchForm = (el) => {
+    if (el.closest('[role=search]')) return true;
+    const f = el.closest('form');
+    if (!f || (f.getAttribute('method') || '').toLowerCase() !== 'get') return false;
+    const fields = f.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea');
+    return fields.length <= 5 && [...fields].some((i) => i.type === 'search' || /^(q|query|search|keywords?)$/i.test(i.name || '') || /^search\b/i.test(i.placeholder || ''));
+  };
   const out = [];
   const seenRadio = new Set();
   // Button-style choice groups (e.g. Ashby's Yes / No buttons beside a hidden checkbox) are one question.
@@ -62,7 +71,7 @@ const OBSERVE_JS = String.raw`(() => {
     if (/for robots only|if you.?re (a )?human|leave this (field|input|box) (blank|empty)|honeypot/i.test(labelOf(el))) continue;
     // The site's own job search and filters (a GET search form, a search region, "Filter jobs") are not the application.
     const fillableTag = el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.getAttribute('role') === 'combobox';
-    if (fillableTag && (el.closest('form[method="get" i], [role=search]') || /\bfilter (jobs|roles|positions|openings|results)\b|\bsearch (jobs|roles|positions|openings)\b|search job title/i.test(labelOf(el)))) continue;
+    if (fillableTag && (inSearchForm(el) || /\bfilter (jobs|roles|positions|openings|results)\b|\bsearch (jobs|roles|positions|openings)\b|search job title/i.test(labelOf(el)))) continue;
     if (groupOf.has(el)) {
       const btns = groupOf.get(el);
       const idx = out.length;
