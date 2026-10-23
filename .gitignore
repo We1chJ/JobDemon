@@ -3,3 +3,5 @@ node_modules/
 data/*
 !data/templates/
 *.sqlite
+extension/dist/
+.DS_Store

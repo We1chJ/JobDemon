@@ -10,7 +10,12 @@
     "mock": "tsx mock/server.ts",
     "test:e2e": "tsx mock/e2e.ts",
     "test:qa": "tsx --test mock/qa.test.ts mock/workday.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "node extension/build.mjs",
+    "build:watch": "node extension/build.mjs --watch --dev",
+    "test:ext": "tsx extension/test/e2e.ts",
+    "export": "tsx scripts/export.ts",
+    "typecheck:ext": "tsc -p extension/tsconfig.json"
   },
   "repository": {
     "type": "git",
@@ -39,6 +44,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/chrome": "^0.3.6",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
