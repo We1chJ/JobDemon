@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -479,6 +479,24 @@ document.querySelectorAll('select.select2-hidden-accessible').forEach((s) => s.a
   const t = s.options[s.selectedIndex].value ? s.options[s.selectedIndex].text : '';
   s.parentElement.querySelector('.face').textContent = t || 'Select'; document.querySelector('label[for=' + s.id + '] .sr').textContent = t;
 }));</script></body></html>`);
+  });
+  // 19: Lever-style: "Company - Role" title, ✱ as the required mark, a label wrapping its <select>, a short heading
+  // over the real question, a 300-school list, and a required "select all" none of whose options fit.
+  app.get('/jobs/19', (c) => {
+    const schools = ['Other', ...Array.from({ length: 150 }, (_, i) => `Alpha College ${i}`), 'State University', ...Array.from({ length: 150 }, (_, i) => `Zeta Institute ${i}`)];
+    return c.html(`<!doctype html><html><head><title>Mockco Labs - ${ROLES['19']}</title></head><body><h1>${ROLES['19']}</h1>${JD}
+<form id="f19"><ul>
+<li><label>Resume/CV <span class="required">✱</span><input type="file" id="cv19" name="cv19"></label></li>
+<li><label>Full name <span class="required">✱</span><input id="fn19" name="fn19" required></label></li>
+<li><label>Email <span class="required">✱</span><input id="em19" name="em19" type="email" required></label></li>
+<li><div class="application-question"><div class="application-label">Language Skill(s) (Check all that apply) <span class="required">✱</span></div>
+<ul><li><label><input type="checkbox" name="lang19" value="kl">Klingon</label></li><li><label><input type="checkbox" name="lang19" value="el">Elvish</label></li></ul></div></li>
+</ul>
+<div class="custom-question"><h4>UNIVERSITY</h4><select id="uni19" name="uni19" required><option value="">Click here</option>${schools.map((n) => `<option>${n}</option>`).join('')}</select></div>
+<div class="custom-question"><h4>DELTA VS. DEV</h4><p>Tell us which team you would prefer, Delta or Dev, and why that team fits your strengths.</p><textarea id="dd19" name="dd19" required></textarea></div>
+<div><label for="sa19">Short answer</label><input id="sa19" name="sa19" placeholder="In 2-3 sentences" aria-describedby="h19"></div><p id="h19">Mention one project you are proud of.</p>
+<div><label>Veteran status<div><select id="vet19" name="vet19"><option value="">Select ...</option><option>I identify as one or more of the classifications of protected veteran listed above</option><option>I am not a protected veteran</option><option>I decline to self-identify for protected veteran status</option></select></div></label></div>
+<button type="button">Submit application</button></form></body></html>`);
   });
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));

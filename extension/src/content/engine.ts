@@ -7,6 +7,7 @@ import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
 import { readJob, readStep, type Button, type Field, type Step } from './read.js';
 import { WIDGETS, key, press, sleep } from './widgets.js';
+import { log, snapshot } from './log.js';
 
 const MAX_ENTRIES = 6; // most entries the bot will add to one repeating section
 const MAX_PAGES = 40;
@@ -47,6 +48,8 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
   const tried = new Set<string>(), decided = new Set<string>(), answers = new Map<string, string>();
   const needs: string[] = [];
   let filled = 0, step: Step = readStep();
+  const worth = top || step.fields.length > 0; // embedded frames with no questions (captchas, ads) stay out of the log
+  if (worth) snapshot(retry ? 'before filling again (the page flagged fields)' : 'before filling');
   for (let guard = 0; guard < 300 && !stopping; guard++) {
     step = readStep();
     // Repeating sections: how many entries each needs is the AI's call, from your data. Then add them.
@@ -57,6 +60,7 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       say(`Working out "${section.heading}"`);
       const a = await ask<Answer>({ t: 'answer', q: { prompt: `How many entries should the "${section.heading}" section have for this applicant?`, candidates: counts, required: false } });
       const want = a.kind === 'pick' ? a.indexes[0] : section.entries;
+      log({ type: 'section', heading: section.heading, had: section.entries, want });
       for (let i = section.entries; i < want && !stopping; i++) {
         const add = readStep().sections.find((s) => s.heading === section.heading)?.add ?? section.add;
         press(add);
@@ -70,21 +74,24 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
     tried.add(f.key);
     const label = f.entry ? `${f.entry} > ${f.label}` : f.label;
     const handler = WIDGETS[f.kind];
-    if (!handler) { if (f.required) needs.push(label); continue; }
+    if (!handler) { log({ type: 'field', q: label, kind: f.kind, status: 'unrecognised control' }); if (f.required) needs.push(label); continue; }
     const i = step.fields.indexOf(f), above = step.fields[i - 1];
     say(`Filling "${label.slice(0, 60)}"`);
     try {
       const r = await handler(f, { previous: above ? { prompt: above.label, answer: answers.get(above.key) ?? above.value } : undefined, feedback: retry ? f.error : undefined }, retry && !!f.error);
-      console.info(`JobDemon: ${r.status} "${label}": ${r.detail}`); // the page's console is the run log
+      console.info(`JobDemon: ${r.status} "${label}": ${r.detail}`);
+      log({ type: 'field', q: label, kind: f.kind, status: r.status, detail: r.detail });
       if (r.status === 'filled') { filled++; answers.set(f.key, r.value); }
       if (r.status === 'escalate') needs.push(label);
     } catch (err) {
       key('Escape');
       console.warn('JobDemon:', label, (err as Error).message);
+      log({ type: 'field', q: label, kind: f.kind, status: 'error', detail: (err as Error).message });
       if (/API key|not responding/i.test((err as Error).message)) throw err;
       if (f.required) needs.push(label);
     }
   }
+  if (worth) snapshot(stopping ? 'stopped' : 'after filling');
   return { fields: readStep().fields.length, filled, needs };
 }
 
@@ -98,6 +105,7 @@ export async function fillOne(control: Element, say: Say) {
   const i = step.fields.indexOf(f), above = step.fields[i - 1];
   say(`Filling "${f.label.slice(0, 60)}"`);
   const r = await handler(f, { previous: above ? { prompt: above.label, answer: above.value } : undefined }, true);
+  log({ type: 'field', q: f.label, kind: f.kind, status: r.status, detail: r.detail, how: 'button beside the field' });
   say(r.status === 'filled' ? `Filled "${f.label.slice(0, 40)}"` : r.detail);
 }
 
@@ -159,7 +167,7 @@ export async function continueRun(say: Say, resume = false) {
   const stillOn = async () => !stopping && !!(await ask<Run | null>({ t: 'run:get' }))?.active;
   let report: FillReport = { fields: 0, filled: 0, needs: [] };
   const halted = () => say(stopping ? 'Stopped.' : Date.now() - run.lastClickAt < 10000 ? 'Carrying on in the tab that just opened' : 'Stopped.', stopping ? report.needs : undefined);
-  const stop = async (msg: string) => { await save(null); await end(report, say, msg); };
+  const stop = async (msg: string) => { log({ type: 'continue ended', message: msg }); await save(null); await end(report, say, msg); };
 
   for (let page = 0; page < MAX_PAGES; page++) {
     if (!(await stillOn())) return halted();
@@ -187,6 +195,7 @@ export async function continueRun(say: Say, resume = false) {
         await save(run);
         if (!(await stillOn())) return halted();
         say(`Opening the application: "${start.text}"`);
+        log({ type: 'click', button: start.text, why: 'way into the application' });
         press(start.el);
         await waitForChange(step);
         continue;
@@ -212,6 +221,7 @@ export async function continueRun(say: Say, resume = false) {
       run.tries[tag] = 2;
       await save(run);
       say(`The page flagged ${flagged.length} field${flagged.length === 1 ? '' : 's'}: answering again with its message`);
+      log({ type: 'retry', flagged: flagged.map((f) => `${f.label}: ${f.error}`) });
       report = await fillAll(say, true);
       if (!(await stillOn())) return halted();
       continue;
@@ -222,6 +232,7 @@ export async function continueRun(say: Say, resume = false) {
     await save(run);
     if (!(await stillOn())) return halted();
     say(`Next: "${next.text}"`);
+    log({ type: 'click', button: next.text, why: 'next page', attempt: tries + 1 });
     press(next.el);
     await waitForChange(step);
   }

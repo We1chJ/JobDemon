@@ -160,11 +160,20 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     pre.textContent = 'Writing your cover letter for this job (10–30 seconds)…';
     try { pre.textContent = await ask<string>({ t: 'letter' }); } catch (e) { pre.textContent = `Couldn't write it: ${(e as Error).message}`; }
   };
+  // Everything JobDemon saw and did in this tab, without your personal details: paste it to Claude to find a bug.
+  const copyReport = async () => {
+    try {
+      const text = await ask<string>({ t: 'report' });
+      await navigator.clipboard.writeText(text);
+      say('Debug report copied. Paste it to Claude.');
+    } catch (e) { say(`Couldn't copy the report: ${(e as Error).message}`); }
+  };
   menu.append(
     item('Cover letter', () => void openLetter()),
     el('hr'),
     item('Dashboard', () => void ask({ t: 'open', page: 'dashboard' })),
     item('Setup', () => void ask({ t: 'open', page: 'setup' })),
+    item('Copy debug report', () => void copyReport()),
     el('hr'),
     item('Hide', () => mini(true)),
   );

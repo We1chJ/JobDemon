@@ -151,6 +151,8 @@ async function paragraph(s: Settings, job: JobCtx, question: string, profile: Pr
 /** What Jev sees with every question: the question, the whole applicant, the guidelines. */
 const state = (q: Question, ctx: Context, chosen: string[] = []) => ({
   question: q.prompt,
+  ...(q.description ? { question_details: q.description } : {}),
+  ...(q.answerBox ? { answer_box: q.answerBox } : {}),
   required: q.required,
   ...(q.multiple ? { select_all_that_apply: true } : {}),
   ...(chosen.length ? { already_chosen: chosen } : {}),
@@ -201,7 +203,7 @@ class JevBrain implements Brain {
 
 // Offline stand-in (tests only): mirrors what Jev is expected to conclude on the mock forms.
 const KEY_RULES: [RegExp, string][] = [
-  [/high school/i, 'high_school_grad_year'], [/^school\b/i, 'school'],
+  [/high school/i, 'high_school_grad_year'], [/^(school|university|college)\b/i, 'school'], [/full name/i, 'full_name'],
   [/end date month|graduation month/i, 'graduation_month'], [/start date month/i, 'school_start_month'], [/start date year/i, 'school_start_year'],
   [/\bgpa\b/i, 'gpa'], [/\bact\b/i, 'act_score'], [/\bsat\b/i, 'sat_score'],
   [/street address/i, 'address_street'], [/postal code|zip/i, 'address_zip'], [/mailing address/i, 'mailing_address'],
@@ -296,7 +298,7 @@ class FakeBrain implements Brain {
     const { prompt } = q;
     if (/^(if (so|yes)|please (explain|specify)|explain\b)/i.test(prompt) && q.previous && /^(no|none|n\/?a)\b/i.test(q.previous.answer.trim())) return { blank: true, confidence: 0.95 };
     if (/cover letter/i.test(prompt)) return { write: 'cover_letter' as const, confidence: 0.95 };
-    if (/why|describe|tell us/i.test(prompt)) return { write: 'paragraph' as const, confidence: 0.95 };
+    if (/why|describe|tell us/i.test(`${prompt} ${q.description ?? ''}`)) return { write: 'paragraph' as const, confidence: 0.95 };
     if (/\bext(ension)?\b/i.test(prompt)) return { confidence: 0.95 };
     const entry = entryFact(prompt, ctx);
     if (entry) return { fact: entry, confidence: 0.95 };

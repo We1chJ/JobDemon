@@ -25,6 +25,40 @@ async function letterFor(tab: chrome.tabs.Tab) {
   return { text, job: ctx.job };
 }
 
+// ── The debug report ────────────────────────────────────────────────────────
+const MAX_LOG = 400;
+const chains = new Map<number, Promise<unknown>>();
+/** Add to a tab's log, one write at a time (frames log at the same moment). */
+function appendLog(tabId: number, e: Record<string, unknown>) {
+  const next = (chains.get(tabId) ?? Promise.resolve()).then(async () => {
+    const k = `log:${tabId}`;
+    const list = ((await session.get(k))[k] as Record<string, unknown>[] | undefined) ?? [];
+    list.push(e);
+    await session.set({ [k]: list.slice(-MAX_LOG) });
+  }).catch(() => {});
+  chains.set(tabId, next);
+  return next;
+}
+
+/** The tab's log as text to paste to Claude, with your personal details taken out. */
+async function report(tab: chrome.tabs.Tab) {
+  await chains.get(tab.id!);
+  const [entries, { job, portal }, profile, settings] = await Promise.all([
+    session.get(`log:${tab.id}`).then((r) => (r[`log:${tab.id}`] as Record<string, unknown>[] | undefined) ?? []), tabJob(tab), store.profile(), store.settings(),
+  ]);
+  let text = JSON.stringify({
+    jobdemon: chrome.runtime.getManifest().version, made: new Date().toISOString(), page: (tab.url ?? '').split(/[?#]/)[0],
+    job: { company: job.company, role: job.role, portal }, ai: settings.fake ? 'offline test brain' : `Jev + ${settings.openaiModel}`,
+    entries: entries.map((e) => ({ at: e.at, where: e.where, type: e.type, ...e })), // storage sorts keys: put these first again
+  }, null, 1);
+  // Your details as typed in Setup, then anything shaped like an email address or a phone number.
+  const mine = Object.entries(profile.fields)
+    .filter(([k, v]) => v && v.length >= 3 && /name|email|phone|address|street|zip|postal|city|linkedin|github|website|birth/i.test(k))
+    .sort((a, b) => b[1].length - a[1].length);
+  for (const [k, v] of mine) text = text.split(v).join(`[${k}]`);
+  return text.replace(/[^\s"@]+@[^\s"@]+\.[a-z]{2,}/gi, '[email]').replace(/(?<![\d-])\+?(?:\d[\s().-]*){10,15}(?![\d-])/g, '[number]');
+}
+
 /** Ask every frame inside the tab (not the page itself) to do something, one after another. */
 async function frames(tabId: number, m: ToFrame): Promise<FillReport> {
   const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
@@ -49,7 +83,10 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
       const had = got[`job:${id}`] as TabJob | undefined, running = !!(got[`run:${id}`] as Run | undefined)?.active;
       const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
       const laterStep = had && host(had.job.url) === host(m.job.url) && m.job.jd.length < 1000;
-      if (!had || (!running && !laterStep && had.job.url !== m.job.url)) await session.set({ [`job:${id}`]: { job: m.job, portal: m.portal } });
+      if (!had || (!running && !laterStep && had.job.url !== m.job.url)) {
+        await session.set({ [`job:${id}`]: { job: m.job, portal: m.portal } });
+        if (had) await session.remove(`log:${id}`); // a different job: its own log
+      }
       return null;
     }
     case 'answer': {
@@ -80,6 +117,8 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
     case 'run:get': return ((await session.get(`run:${id}`))[`run:${id}`] as Run | undefined) ?? null;
     case 'run:set': return m.run ? session.set({ [`run:${id}`]: m.run }) : session.remove(`run:${id}`);
     case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: m.op });
+    case 'log': return appendLog(id, m.e);
+    case 'report': return report(tab);
     case 'submit:pending': {
       // Only on pages JobDemon knows as a job application (it showed its bar there).
       if (!(await session.get(`job:${id}`))[`job:${id}`]) return false;
@@ -120,5 +159,5 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   await session.set({ [`run:${tab.id}`]: { ...run, lastClickAt: Date.now() }, ...(got[`job:${from}`] ? { [`job:${tab.id}`]: got[`job:${from}`] } : {}) });
   await session.remove(`run:${from}`);
 });
-chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`, `submit:${id}`]));
+chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`, `submit:${id}`, `log:${id}`]));
 chrome.runtime.onInstalled.addListener((d) => { if (d.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('pages/setup.html') }); });

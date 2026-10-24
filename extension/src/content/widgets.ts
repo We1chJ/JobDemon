@@ -6,6 +6,7 @@ import { unanswered } from '../shared/answer.js';
 import { ask, type FileReply } from '../shared/msg.js';
 import type { Answer, Question } from '../shared/types.js';
 import { readStep, shown, type Field, type WidgetKind } from './read.js';
+import { log } from './log.js';
 
 export interface Deps { previous?: { prompt: string; answer: string }; feedback?: string }
 export type Result =
@@ -19,8 +20,13 @@ const OPTION = '[role=option], [data-automation-id="promptOption"], [data-automa
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const prompt = (f: Field) => (f.entry ? `${f.entry} > ${f.label}` : f.label);
+const BOX: Record<WidgetKind, string> = {
+  text: 'single-line text box', textarea: 'multi-line text box', native: 'dropdown', pick: 'dropdown (some can be searched by typing)', checkbox: 'a single checkbox',
+  checkgroup: 'checkboxes (select all that apply)', radio: 'radio buttons (choose one)', buttons: 'buttons (choose one)', date: 'date boxes', file: 'file upload', unknown: 'unrecognised control',
+};
+/** Everything the form shows about a question goes to the AI, never just its heading. */
 const question = (f: Field, d: Deps, extra: Partial<Question> = {}): Question =>
-  ({ prompt: prompt(f), required: f.required, previous: d.previous, feedback: d.feedback ?? f.error, ...extra });
+  ({ prompt: prompt(f), description: f.description, answerBox: BOX[f.kind], required: f.required, previous: d.previous, feedback: d.feedback ?? f.error, ...extra });
 const answer = (q: Question) => ask<Answer>({ t: 'answer', q });
 const notDone = (q: Question, a: Answer): Result =>
   a.kind === 'unknown' ? { status: 'escalate', detail: `Required field "${q.prompt}": ${a.because}` } : { status: 'skipped', detail: a.because };
@@ -113,7 +119,9 @@ async function native(f: Field, d: Deps): Promise<Result> {
   // A dropdown drawn over the select should now show the choice. If it doesn't follow the select, pick it there instead.
   if (f.face) {
     await sleep(300);
-    if (!(f.face.innerText || '').toLowerCase().includes(chosen.toLowerCase())) return pick({ ...f, kind: 'pick', els: [f.face], editable: false, face: undefined }, d);
+    const shows = (f.face.innerText || '').trim();
+    log({ type: 'dropdown over a hidden select', q: prompt(f), set: chosen, dropdownShows: shows.slice(0, 60) });
+    if (!shows.toLowerCase().includes(chosen.toLowerCase())) return pick({ ...f, kind: 'pick', els: [f.face], editable: false, face: undefined }, d);
   }
   return filled(a.because, chosen);
 }
@@ -125,7 +133,7 @@ async function choose(f: Field, d: Deps): Promise<Result> {
   const q = question(f, d, { candidates, multiple: !single });
   const a = await answer(q);
   const picked = a.kind === 'pick' ? a.indexes : [];
-  if (single && !picked.length) return notDone(q, a);
+  if ((single || (f.kind === 'checkgroup' && f.required)) && !picked.length) return notDone(q, a.kind === 'pick' ? unanswered(q, 'nothing chosen') : a);
   for (let k = 0; k < candidates.length; k++) {
     const on = picked.includes(k);
     if (single && !on) continue;
@@ -166,6 +174,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   const pickFrom = async (list: HTMLElement[]) => {
     const labels = list.map(optLabel);
     const a = await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });
+    log({ type: 'list', q: prompt(f), offered: labels.slice(0, 40), total: labels.length, picked: a.kind === 'pick' ? labels[a.indexes[0]] : `none (${a.because})` });
     if (a.kind !== 'pick') return a;
     press(list[a.indexes[0]]);
     chosen.push(labels[a.indexes[0]]);

@@ -4,6 +4,7 @@
 import { ask } from '../shared/msg.js';
 import { readStep } from './read.js';
 import { sleep } from './widgets.js';
+import { log } from './log.js';
 
 const SUBMIT = /^(submit( (my |your )?application)?|send( (my )?application)?|finish( application)?|complete( (my )?application)?)$/i;
 const CONFIRMED = /thank(s| you) for (applying|your application|your interest|submitting)|application (has been |was )?(received|submitted|complete)|we('ve| have) received your application|successfully (submitted|applied)|you('ve| have) (successfully )?applied|application submitted/i;
@@ -26,7 +27,9 @@ async function outcome(button: Element): Promise<boolean | null> {
 async function submitted(button: Element) {
   const tracked = await ask<boolean>({ t: 'submit:pending' }).catch(() => false);
   if (!tracked) return; // not a page JobDemon knows as a job application
+  log({ type: 'you clicked submit', button: textOf(button) });
   const ok = await outcome(button);
+  log({ type: 'submit outcome', went_through: ok, errors: readStep().errors });
   if (ok !== null) await ask({ t: 'submit:done', ok }).catch(() => {});
 }
 
@@ -43,6 +46,7 @@ export async function afterSubmit() {
   const pending = await ask<{ url: string } | null>({ t: 'submit:get' }).catch(() => null);
   if (!pending) return;
   await sleep(1500);
+  log({ type: 'page after your submit', url: location.origin + location.pathname, errors: readStep().errors, questions: readStep().fields.length });
   for (let waited = 0; waited < 8000; waited += 1000) {
     if (failed()) return void ask({ t: 'submit:done', ok: false });
     if (confirmed() || !readStep().fields.length) return void ask({ t: 'submit:done', ok: true });

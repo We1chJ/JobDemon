@@ -26,6 +26,10 @@ export interface Context {
 
 export interface Question {
   prompt: string;
+  /** Text the form shows with the question (instructions, the full question under a short heading). */
+  description?: string;
+  /** What the answer goes into: "multi-line text box", "dropdown", "checkboxes"… (a hint, e.g. a large box suggests a written answer). */
+  answerBox?: string;
   /** The form's own options (or the applicant's files for an upload). Absent for free text. */
   candidates?: string[];
   /** "Select all that apply". */

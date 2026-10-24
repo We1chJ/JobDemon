@@ -1,6 +1,7 @@
 // Reads the page into questions, by page structure and standard accessibility markup: a question is a label
 // (or legend) plus the control(s) it belongs to; a control's kind comes from its standard type, role and ARIA
 // state. Portal-specific names (Workday's data-automation-id) are only a fallback. Nothing here decides an answer.
+import { portalName } from '../shared/portal.js';
 
 /** The interaction patterns, plus native selects and anything unrecognised. */
 export type WidgetKind = 'text' | 'textarea' | 'native' | 'pick' | 'checkbox' | 'checkgroup' | 'radio' | 'buttons' | 'date' | 'file' | 'unknown';
@@ -19,6 +20,7 @@ export interface Field {
   box: HTMLElement; // the question's container
   els: HTMLElement[]; // its controls (one per option for radios, checkbox lists, button groups, date parts)
   face?: HTMLElement; // the dropdown drawn over a hidden <select>, when there is one
+  description?: string; // other text shown with the question (instructions, or the real question under a heading)
 }
 export interface Button { el: HTMLElement; text: string; autoId: string; footer: boolean }
 export interface Section { add: HTMLElement; heading: string; entries: number }
@@ -33,7 +35,9 @@ export interface Step {
 }
 
 const clean = (s?: string | null) => (s || '').replace(/\s+/g, ' ').trim();
-const noStar = (s?: string | null) => clean(s).replace(/\*/g, '').trim();
+// Required marks: *, and the other stars sites use (✱ ✳ ＊ ∗).
+const STAR = /[*✱✳＊⁎∗]/g;
+const noStar = (s?: string | null) => clean(s).replace(STAR, '').trim();
 export const shown = (el: Element | null | undefined): boolean => {
   if (!el || !(el as HTMLElement).getBoundingClientRect) return false;
   const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
@@ -54,7 +58,14 @@ const isSpin = (el: Element) => roleOf(el) === 'spinbutton' || el.hasAttribute('
 const ownLabels = (el: Element) => [
   ...(el.id ? all(`label[for="${CSS.escape(el.id)}"]`) : []), el.closest('label'), ...byIds(el.getAttribute('aria-labelledby')),
 ].filter((l): l is HTMLElement => !!l);
-const firstText = (els: (Element | null | undefined)[]) => els.map((l) => noStar(l && ((l as HTMLElement).innerText || l.textContent))).find(Boolean) || '';
+/** An element's text without the controls inside it (a label wrapping its <select> would otherwise read out every option). */
+const ownText = (el: Element) => {
+  if (!el.querySelector('select, textarea, input, [role=listbox]')) return (el as HTMLElement).innerText || el.textContent || '';
+  const copy = el.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('select, textarea, input, [role=listbox], script, style').forEach((n) => n.remove());
+  return copy.textContent || '';
+};
+const firstText = (els: (Element | null | undefined)[]) => els.map((l) => noStar(l && ownText(l))).find(Boolean) || '';
 const isTrap = (el: Element) => /for robots only|if you.?re (a )?human|leave this (field|input|box) (blank|empty)|honeypot/i.test(`${firstText(ownLabels(el))} ${el.getAttribute('aria-label') || ''}`);
 // A site search: a search region, or a small GET form with a search box. (Application forms may use GET too.)
 const inSearchForm = (el: Element) => {
@@ -236,7 +247,7 @@ export function readStep(): Step {
     if (!label) label = firstText(all('[class*="label" i]', box).filter((l) => !g.els.some((c) => l.contains(c))));
     if (!label) label = noStar((input(el).placeholder && !/^search\b/i.test(input(el).placeholder) ? input(el).placeholder : '') || aid(box).replace(/^formField-/, '').replace(/[_-]+/g, ' ') || input(el).name?.replace(/[_-]+/g, ' '));
     const required = [g.anchor, ...g.els].some((c) => input(c).required || c.getAttribute('aria-required') === 'true') || groupBy?.getAttribute('aria-required') === 'true'
-      || [...boxLabels, ...ownLabels(el), ...groupLabels].some((l) => /\*/.test(l.innerText || '')) || !!box.querySelector('abbr[title*="required" i]');
+      || [...boxLabels, ...ownLabels(el), ...groupLabels, ...all('[class*="label" i]', box)].some((l) => /[*✱✳＊⁎∗]/.test(ownText(l))) || !!box.querySelector('abbr[title*="required" i]');
     let value = '', options: string[] | undefined, dateParts: Field['dateParts'];
     if (kind === 'radio' || kind === 'checkgroup' || kind === 'checkbox' || kind === 'buttons') {
       options = g.els.map((c) => (kind === 'buttons' ? textOf(c) : optText(c)));
@@ -259,7 +270,19 @@ export function readStep(): Step {
     const linked = g.els.filter((c) => c.getAttribute('aria-invalid') === 'true').flatMap((c) => byIds(`${c.getAttribute('aria-errormessage') || ''} ${c.getAttribute('aria-describedby') || ''}`)).filter(shown).map(textOf).filter(Boolean);
     const inside = all('[role=alert], [id*="error" i], [class*="error" i], [data-automation-id*="error" i]', box).filter(shown).map(textOf).filter(Boolean);
     const entry = entryOf(box);
+    // Everything else the form says about the question, so the AI never sees a bare heading: the rest of its box
+    // (instructions, word limits, the real question under a short heading), help text linked to its controls, and
+    // the box's placeholder. Minus its label, options, current value and error message.
+    const error = linked[0] || inside[0] || '';
+    const linkedHelp = [g.anchor, ...g.els].flatMap((c) => byIds(c.getAttribute('aria-describedby'))).filter((n) => !box.contains(n)).map(textOf).filter((t) => t && t !== error);
+    const placeholder = clean(input(el).placeholder) || clean(el.getAttribute('aria-placeholder'));
+    let rest = clean(ownText(box));
+    for (const t of [label, ...(options ?? []), value, error].filter((x) => x && x.length > 1).sort((x, y) => y.length - x.length)) rest = rest.split(t).join(' ');
+    rest = clean(rest.replace(STAR, ''));
+    const description = [...new Set([rest, ...linkedHelp, placeholder && placeholder !== label && !/^(select|choose|search)\b/i.test(placeholder) ? `(box says: ${placeholder})` : ''])]
+      .filter((t) => t && t.length > 1 && t !== label).join('\n').slice(0, 2000);
     return {
+      description: description || undefined,
       key: `${aid(box) || input(el).name || el.id || ''}|${entry}|${label}`, kind, label, entry: entry || undefined, required, value, options, dateParts,
       editable: kind === 'pick' && el.tagName === 'INPUT', error: linked[0] || inside[0] || undefined, box, els: g.els, face: faces.get(el),
     };
@@ -293,6 +316,15 @@ export function readJob() {
   let company = '', role = '';
   const m = title.match(/Job Application for (.+?) at (.+)$/i);
   if (m) { role = m[1].trim(); company = m[2].trim(); }
+  // Otherwise titles are usually "Company - Role", "Role | Company" or "Role at Company". On a job board's own site
+  // (jobs.lever.co/palantir/…) the company is the first part of the address, which tells the parts apart.
+  const parts = (og('og:title') || title).split(/\s+[|–—-]\s+|\s+at\s+/i).map((p) => p.trim()).filter(Boolean);
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const slug = portalName(location.hostname) ? squash(location.pathname.split('/').filter(Boolean)[0] ?? '') : '';
+  const byAddress = slug.length >= 3 ? parts.find((p) => squash(p).includes(slug) || slug.includes(squash(p))) : undefined;
+  const byHeading = h1 && parts.length >= 2 ? parts.find((p) => !h1.includes(p) && !p.includes(h1)) : undefined;
+  const fromTitle = (byAddress ?? byHeading)?.replace(/\s+(careers|jobs)$/i, '');
+  if (!company && fromTitle && parts.length >= 2) { company = fromTitle; role = role || h1 || parts.filter((p) => p !== byAddress && p !== byHeading).join(' - '); }
   role = role || h1 || og('og:title') || title;
   company = company || og('og:site_name') || location.hostname.replace(/^(www|boards|job-boards|jobs|careers)\./, '').split('.')[0];
   const copy = document.body.cloneNode(true) as HTMLElement;

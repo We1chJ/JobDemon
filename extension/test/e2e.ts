@@ -175,6 +175,33 @@ try {
   await panel(p18).locator('button', { hasText: 'Fill page' }).click();
   await settle(p18);
   check('repeating rows: adds one per job, and filling again adds no more', (await p18.locator('#wrows .row:not([hidden])').count()) === 1 && (await val(p18, '#w0-0')) === 'Acme Corp', `${await p18.locator('#wrows .row:not([hidden])').count()} rows`);
+  // The debug report: what it saw and did, without personal details.
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://localhost:4100' });
+  await panel(p18).locator('button[aria-label=More]').click();
+  await panel(p18).locator('[role=menuitem]', { hasText: 'Copy debug report' }).click();
+  await panel(p18).locator('.t').filter({ hasText: 'copied' }).waitFor({ timeout: 5000 }).catch(() => {});
+  const rep = await p18.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+  if (process.env.DUMP) fs.writeFileSync(process.env.DUMP, rep); // DUMP=file: keep the report to look at
+  check('debug report: page structure, every question and what was done, dropdown lists offered',
+    /"type": "page"/.test(rep) && /Education 1 > Degree name/.test(rep) && /"type": "field"/.test(rep) && /dropdown over a hidden select/.test(rep) && /"outline"/.test(rep), `${rep.length} chars`);
+  check('debug report: no personal details', rep.length > 0 && !/Jane|Doe|jane@example\.com|555 ?0100|linkedin\.com\/in/i.test(rep) && /\[first_name\]/.test(rep));
+  // 19: what a Lever form showed (see mock/server.ts).
+  const p19 = await run(u(19));
+  const a19 = await item(u(19));
+  check('company and role from a "Company - Role" title', a19?.company === 'Mockco Labs' && a19?.role === 'Lever Style Engineer', `${a19?.company} / ${a19?.role}`);
+  check('a 300-option list: answered as text, then chosen from the closest options', (await selected(p19, '#uni19')) === 'State University', await selected(p19, '#uni19'));
+  check('a short heading over the real question: the question underneath is read too', (await val(p19, '#dd19')).length > 20);
+  check('a required "select all" with nothing that fits is left for you', /Language/.test(await needsText(p19)) && !(await p19.locator('input[name=lang19]:checked').count()), await needsText(p19));
+  await panel(p19).locator('button[aria-label=More]').click();
+  await panel(p19).locator('[role=menuitem]', { hasText: 'Copy debug report' }).click();
+  await sleep(800);
+  const fields19 = (JSON.parse(await p19.evaluate(() => navigator.clipboard.readText()).catch(() => '{}')).entries ?? []).find((e: { type: string }) => e.type === 'page')?.fields ?? [];
+  const f19 = (q: RegExp) => fields19.find((f: { q: string }) => q.test(f.q));
+  check('✱ counts as the required mark', f19(/^Resume/)?.required === true && f19(/^Resume/)?.q === 'Resume/CV', JSON.stringify(f19(/^Resume/)?.q));
+  check("a label wrapping its <select> doesn't read out the options", f19(/^Veteran/)?.q === 'Veteran status', f19(/^Veteran/)?.q);
+  check('the question underneath a heading is in the report', /which team you would prefer/.test(f19(/DELTA/)?.details ?? ''));
+  check('linked help text and the box\'s placeholder are part of the question', /proud of/.test(f19(/^Short answer/)?.details ?? '') && /2-3 sentences/.test(f19(/^Short answer/)?.details ?? ''), f19(/^Short answer/)?.details);
+
   check("row 2 isn't given school 1's details", (await val(p18, '#deg1')) === '' && (await val(p18, '#sd1')) === '');
 
   check('nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);

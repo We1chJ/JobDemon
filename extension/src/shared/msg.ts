@@ -16,6 +16,8 @@ export type ToBackground =
   | { t: 'run:get' }
   | { t: 'run:set'; run: Run | null }
   | { t: 'frames'; op: 'fill' | 'hover' | 'stop'; retry?: boolean }
+  | { t: 'log'; e: Record<string, unknown> }
+  | { t: 'report' }
   | { t: 'submit:pending' }
   | { t: 'submit:get' }
   | { t: 'submit:done'; ok: boolean }
