@@ -44,9 +44,12 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
   switch (m.t) {
     case 'job': {
       // The first page of an application has the job description; later pages keep it unless the site changes.
-      const had = (await session.get(`job:${id}`))[`job:${id}`] as TabJob | undefined;
+      // Another job in the same tab replaces it; a later step of the same application (little text, same site) doesn't.
+      const got = await session.get([`job:${id}`, `run:${id}`]);
+      const had = got[`job:${id}`] as TabJob | undefined, running = !!(got[`run:${id}`] as Run | undefined)?.active;
       const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
-      if (!had || (host(had.job.url) !== host(m.job.url) && m.job.jd.length > 200)) await session.set({ [`job:${id}`]: { job: m.job, portal: m.portal } });
+      const laterStep = had && host(had.job.url) === host(m.job.url) && m.job.jd.length < 1000;
+      if (!had || (!running && !laterStep && had.job.url !== m.job.url)) await session.set({ [`job:${id}`]: { job: m.job, portal: m.portal } });
       return null;
     }
     case 'answer': {
@@ -76,8 +79,27 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
     }
     case 'run:get': return ((await session.get(`run:${id}`))[`run:${id}`] as Run | undefined) ?? null;
     case 'run:set': return m.run ? session.set({ [`run:${id}`]: m.run }) : session.remove(`run:${id}`);
-    case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: 'hover' });
-    case 'close': return setTimeout(() => void chrome.tabs.remove(id), 200);
+    case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: m.op });
+    case 'submit:pending': {
+      // Only on pages JobDemon knows as a job application (it showed its bar there).
+      if (!(await session.get(`job:${id}`))[`job:${id}`]) return false;
+      await session.set({ [`submit:${id}`]: { at: Date.now(), url: sender.url ?? tab.url ?? '' } });
+      return true;
+    }
+    case 'submit:get': {
+      const p = (await session.get(`submit:${id}`))[`submit:${id}`] as { at: number; url: string } | undefined;
+      return p && Date.now() - p.at < 120000 ? p : null;
+    }
+    case 'submit:done': {
+      if (!(await session.get(`submit:${id}`))[`submit:${id}`]) return null;
+      await session.remove(`submit:${id}`);
+      if (!m.ok) return null;
+      const { job, portal } = await tabJob(tab);
+      await updateHistory(job.url, { company: job.company, role: job.role, portal: portal ?? '', status: 'applied', needs: [] });
+      await session.remove(`run:${id}`);
+      await chrome.tabs.sendMessage(id, { t: 'applied' } satisfies ToFrame, { frameId: 0 }).catch(() => {});
+      return null;
+    }
   }
 }
 
@@ -98,5 +120,5 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   await session.set({ [`run:${tab.id}`]: { ...run, lastClickAt: Date.now() }, ...(got[`job:${from}`] ? { [`job:${tab.id}`]: got[`job:${from}`] } : {}) });
   await session.remove(`run:${from}`);
 });
-chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`]));
+chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`, `submit:${id}`]));
 chrome.runtime.onInstalled.addListener((d) => { if (d.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('pages/setup.html') }); });

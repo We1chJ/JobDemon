@@ -78,9 +78,13 @@ async function typeIn(f: Field, d: Deps, force = false): Promise<Result> {
   const q = question(f, d);
   const a = await answer(q);
   if (a.kind !== 'text') return notDone(q, a);
-  if (force || f.value !== a.value) {
+  // Date boxes the browser draws (type=date / month) take only their own format.
+  const type = (f.els[0] as HTMLInputElement).type;
+  const when = /^(date|month)$/.test(type) ? parseDate(a.value) : null;
+  const value = when?.year && when.month ? (type === 'month' ? `${when.year}-${when.month}` : `${when.year}-${when.month}-${when.day ?? '01'}`) : a.value;
+  if (force || f.value !== value) {
     const before = new Set(visibleOptions(f));
-    typeInto(f.els[0], a.value);
+    typeInto(f.els[0], value);
     await sleep(500);
     const fresh = visibleOptions(f).filter((o) => !before.has(o));
     if (fresh.length) {
@@ -89,8 +93,8 @@ async function typeIn(f: Field, d: Deps, force = false): Promise<Result> {
     }
     leave(f.els[0]);
   }
-  if (!shows(f)) return notDone(q, unanswered(q, `typed "${a.value}" but the field is still empty`));
-  return filled(`${a.because}: ${a.value.length > 60 ? `${a.value.length} chars` : a.value}`, a.value);
+  if (!shows(f)) return notDone(q, unanswered(q, `typed "${value}" but the field is still empty`));
+  return filled(`${a.because}: ${value.length > 60 ? `${value.length} chars` : value}`, value);
 }
 
 /** Native <select>: the options are right there. */
@@ -105,7 +109,13 @@ async function native(f: Field, d: Deps): Promise<Result> {
   sel.dispatchEvent(new Event('input', { bubbles: true }));
   sel.dispatchEvent(new Event('change', { bubbles: true }));
   leave(sel);
-  return filled(a.because, opts[a.indexes[0]].text.trim());
+  const chosen = opts[a.indexes[0]].text.trim();
+  // A dropdown drawn over the select should now show the choice. If it doesn't follow the select, pick it there instead.
+  if (f.face) {
+    await sleep(300);
+    if (!(f.face.innerText || '').toLowerCase().includes(chosen.toLowerCase())) return pick({ ...f, kind: 'pick', els: [f.face], editable: false, face: undefined }, d);
+  }
+  return filled(a.because, chosen);
 }
 
 /** Radios, checkbox lists, single checkboxes and button groups: the labels are the candidates. */

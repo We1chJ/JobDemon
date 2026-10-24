@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -450,6 +450,35 @@ export function mockApp() {
     if (!body.email || !body.password) return c.html(workdaySignIn(job));
     setCookie(c, 'wd_session', '1', { path: '/' });
     return c.redirect(`/jobs/${job}/apply`);
+  });
+  // 18: IBM-style: dropdowns drawn over a hidden <select> (Select2: the select shrunk to a pixel, its choice also in the
+  // label for screen readers), and repeating education rows with no numbered headings, dates in <input type=month>.
+  app.get('/jobs/18', (c) => {
+    const s2 = (id: string, label: string, opts: [string, string][], chosen = '') => `<div class="fieldSpec"><label for="${id}" id="${id}-lbl"><span>${label}</span><span class="req">*</span><span class="sr">${opts.find(([v]) => v === chosen)?.[1] ?? ''}</span></label>
+<div><select id="${id}" name="${id}" required class="select2-hidden-accessible" tabindex="-1" aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"><option value="">Select</option>${opts.map(([v, t]) => `<option value="${v}"${v === chosen ? ' selected' : ''}>${t}</option>`).join('')}</select>
+<span class="select2 select2-container"><span role="combobox" aria-labelledby="${id}-lbl" aria-haspopup="true" tabindex="0" class="face">${opts.find(([v]) => v === chosen)?.[1] ?? 'Select'}</span></span></div></div>`;
+    const row = (k: string, hidden = false) => `<fieldset class="row"${hidden ? ' hidden aria-hidden="true"' : ''}><div class="fieldSpec"><label for="deg${k}">Degree name</label><input id="deg${k}" name="deg${k}"></div>
+<div class="fieldSpec"><label for="sd${k}">Start Date</label><input type="month" id="sd${k}" name="sd${k}"></div></fieldset>`;
+    return c.html(`<!doctype html><html><head><title>Job Application for ${ROLES['18']} at Mockco</title></head><body><h1>${ROLES['18']}</h1>${JD}
+<form id="f18"><div><label for="fn18">First name *</label><input id="fn18" name="fn18" required></div><div><label for="em18">Email *</label><input id="em18" type="email" name="em18" required></div>
+${s2('ctry', 'Country', [['CA', 'Canada'], ['US', 'United States']])}
+${s2('state', 'State/Province', [['CA', 'CALIFORNIA'], ['MA', 'MASSACHUSETTS']], 'MA')}
+<div class="fieldSpec"><label for="cit">Country of citizenship *</label><div class="dd"><select id="cit" name="cit" required tabindex="-1" aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"><option value="">Select</option><option value="CA">Canada</option><option value="US">United States</option></select>
+<span role="combobox" aria-haspopup="listbox" aria-expanded="false" tabindex="0" id="citface">Select</span><ul role="listbox" hidden id="citlist"><li role="option" data-v="CA">Canada</li><li role="option" data-v="US">United States</li></ul></div></div>
+<h2>Education</h2><div class="dataset">${row('sample', true)}${row('0')}${row('1')}</div>
+<section id="work18"><h2>Work history</h2><div class="dataset" id="wrows"><fieldset class="row" hidden aria-hidden="true"><div class="fieldSpec"><label>Company</label><input></div><div class="fieldSpec"><label>Position title</label><input></div></fieldset></div>
+<button type="button" id="addwork">Add</button></section>
+<button type="button">Submit</button></form>
+<script>// A drawn dropdown that ignores changes made to its select: only its own list updates it (and the select).
+const cf = document.getElementById('citface'), cl = document.getElementById('citlist');
+cf.addEventListener('click', () => { cl.hidden = !cl.hidden; cf.setAttribute('aria-expanded', String(!cl.hidden)); });
+cl.addEventListener('click', (e) => { const o = e.target.closest('[role=option]'); if (!o) return; cf.textContent = o.textContent; document.getElementById('cit').value = o.dataset.v; cl.hidden = true; });
+let n18 = 0; document.getElementById('addwork').onclick = () => { const r = document.querySelector('#wrows .row').cloneNode(true); r.hidden = false; r.removeAttribute('aria-hidden');
+  r.querySelectorAll('label').forEach((l, i) => { const id = 'w' + n18 + '-' + i; l.htmlFor = id; r.querySelectorAll('input')[i].id = id; }); n18++; document.getElementById('wrows').append(r); };
+document.querySelectorAll('select.select2-hidden-accessible').forEach((s) => s.addEventListener('change', () => {
+  const t = s.options[s.selectedIndex].value ? s.options[s.selectedIndex].text : '';
+  s.parentElement.querySelector('.face').textContent = t || 'Select'; document.querySelector('label[for=' + s.id + '] .sr').textContent = t;
+}));</script></body></html>`);
   });
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));

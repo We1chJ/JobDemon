@@ -27,15 +27,27 @@ const ELSEWHERE = /apply with|sign (in|up) with|log ?in with|continue with|impor
 const find = (buttons: Button[], b: { id: RegExp; text: RegExp }) =>
   buttons.find((x) => x.footer && b.text.test(x.text)) ?? buttons.find((x) => b.text.test(x.text)) ?? buttons.find((x) => x.autoId && b.id.test(x.autoId));
 
-export type Say = (status: string, detail?: string) => void;
+/** What the widget shows: a status line, and (when given) the fields left for you. */
+export type Say = (status: string, needs?: string[]) => void;
 const top = window.top === window;
+
+// Stop: the field being filled finishes, nothing after it starts (in this frame, and in forms embedded in the page).
+let stopping = false;
+/** Stop whatever is filling in this tab. */
+export async function requestStop() {
+  stopping = true;
+  await ask({ t: 'run:set', run: null }).catch(() => {});
+  if (top) await ask({ t: 'frames', op: 'stop' }).catch(() => {});
+}
+/** A frame was told to stop (or, with false, that a new fill is starting). */
+export const setStopping = (on: boolean) => { stopping = on; };
 
 /** Fill this frame's page. `retry` also re-answers fields the page flagged with an error. */
 export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
   const tried = new Set<string>(), decided = new Set<string>(), answers = new Map<string, string>();
   const needs: string[] = [];
   let filled = 0, step: Step = readStep();
-  for (let guard = 0; guard < 300; guard++) {
+  for (let guard = 0; guard < 300 && !stopping; guard++) {
     step = readStep();
     // Repeating sections: how many entries each needs is the AI's call, from your data. Then add them.
     const section = step.sections.find((s) => !decided.has(s.heading));
@@ -45,7 +57,7 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       say(`Working out "${section.heading}"`);
       const a = await ask<Answer>({ t: 'answer', q: { prompt: `How many entries should the "${section.heading}" section have for this applicant?`, candidates: counts, required: false } });
       const want = a.kind === 'pick' ? a.indexes[0] : section.entries;
-      for (let i = section.entries; i < want; i++) {
+      for (let i = section.entries; i < want && !stopping; i++) {
         const add = readStep().sections.find((s) => s.heading === section.heading)?.add ?? section.add;
         press(add);
         await sleep(700);
@@ -92,7 +104,7 @@ export async function fillOne(control: Element, say: Say) {
 /** This frame plus every form embedded in the page (e.g. a Greenhouse form on a company's careers site). */
 async function fillAll(say: Say, retry = false): Promise<FillReport> {
   const here = await fillFrame(say, retry);
-  const frames = top ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
+  const frames = top && !stopping ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
   return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs] };
 }
 
@@ -108,19 +120,22 @@ async function begin(say: Say) {
 
 async function end(report: FillReport, say: Say, final: string) {
   await ask({ t: 'history', patch: { status: report.needs.length ? 'needs_you' : 'filled', needs: report.needs } }).catch(() => {});
-  say(final, report.needs.length ? `${report.needs.length} field${report.needs.length === 1 ? '' : 's'} need you: ${report.needs.join(' · ')}` : '');
+  say(final, report.needs);
 }
 
 /** Fill this page. */
 export async function fillThisPage(say: Say) {
+  stopping = false;
   await begin(say);
   const r = await fillAll(say);
-  await end(r, say, r.fields ? `Filled ${r.filled} field${r.filled === 1 ? '' : 's'}. Check the page.` : 'No application questions on this page.');
+  if (stopping) return void say('Stopped.', r.needs);
+  await end(r, say, r.fields ? `Filled ${r.filled} field${r.filled === 1 ? '' : 's'}. Check the page.` : 'No application questions here.');
   return r;
 }
 
 const newRun = (): Run => ({ active: true, filledAny: false, tries: {}, started: [], lastClickAt: Date.now() });
-const save = (run: Run | null) => ask({ t: 'run:set', run });
+// Once you press Stop, nothing here may bring the run back.
+const save = (run: Run | null) => (stopping && run ? Promise.resolve() : ask({ t: 'run:set', run }));
 const stepTag = (s: Step) => `${location.pathname}#${s.name}#${s.progress?.at ?? ''}#${s.fields.map((f) => f.key).sort().join(',')}`;
 
 /** After a click: wait until the page moves on or shows an error (up to 20 s). A full page load ends this script. */
@@ -136,28 +151,30 @@ async function waitForChange(before: Step) {
 
 /** Continue: from the page this tab shows, through the next pages, to Submit. */
 export async function continueRun(say: Say, resume = false) {
+  stopping = false;
   let run = (resume && (await ask<Run | null>({ t: 'run:get' }))) || newRun();
   run.active = true;
   await save(run);
   if (!resume) await begin(say);
-  const stillOn = async () => !!(await ask<Run | null>({ t: 'run:get' }))?.active;
-  const stopped = () => say(Date.now() - run.lastClickAt < 10000 ? 'Carrying on in the tab that just opened' : 'Stopped');
+  const stillOn = async () => !stopping && !!(await ask<Run | null>({ t: 'run:get' }))?.active;
   let report: FillReport = { fields: 0, filled: 0, needs: [] };
+  const halted = () => say(stopping ? 'Stopped.' : Date.now() - run.lastClickAt < 10000 ? 'Carrying on in the tab that just opened' : 'Stopped.', stopping ? report.needs : undefined);
   const stop = async (msg: string) => { await save(null); await end(report, say, msg); };
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    if (!(await stillOn())) return stopped();
+    if (!(await stillOn())) return halted();
     // Sign-in / create account: wait for you, then carry on (here, or on the page that loads next).
     if (readStep().signIn) {
       run.waiting = 'sign-in';
       await save(run);
-      say('Sign in or create your account. JobDemon carries on once you are in.');
-      while (readStep().signIn) { await sleep(2000); if (!(await stillOn())) return stopped(); }
+      say('Sign in or create your account. JobDemon carries on after.');
+      while (readStep().signIn) { await sleep(2000); if (!(await stillOn())) return halted(); }
       run.waiting = undefined;
       await save(run);
       await sleep(1500);
     }
     report = await fillAll(say);
+    if (!(await stillOn())) return halted();
     const step = readStep();
     const ways = step.buttons.filter((b) => !ELSEWHERE.test(b.text));
 
@@ -168,6 +185,7 @@ export async function continueRun(say: Say, resume = false) {
         run.started.push(start.text);
         run.lastClickAt = Date.now();
         await save(run);
+        if (!(await stillOn())) return halted();
         say(`Opening the application: "${start.text}"`);
         press(start.el);
         await waitForChange(step);
@@ -184,7 +202,7 @@ export async function continueRun(say: Say, resume = false) {
       // Nothing to click yet: the page may still be drawing after the last click.
       if (!next && !report.fields && Date.now() - run.lastClickAt < 20000) { await sleep(1500); continue; }
       const submit = step.buttons.find((b) => SUBMIT.test(b.text));
-      return stop(submit ? `Everything JobDemon can fill is filled. Check it, then click "${submit.text}" yourself.` : 'Filled. Check the page and submit it yourself.');
+      return stop(submit ? `Done. Check it, then click "${submit.text}".` : 'Done. Check the page, then submit it.');
     }
     // Tries: 0 = first click; 1 = the page refused, answer its flagged fields again; 2 = second click; 3 = give up.
     const tag = stepTag(step);
@@ -195,12 +213,14 @@ export async function continueRun(say: Say, resume = false) {
       await save(run);
       say(`The page flagged ${flagged.length} field${flagged.length === 1 ? '' : 's'}: answering again with its message`);
       report = await fillAll(say, true);
+      if (!(await stillOn())) return halted();
       continue;
     }
     if (tries === 1 || tries >= 3) return stop(`The page didn't move on from "${step.name || 'this step'}"${step.errors.length ? `. It says: ${step.errors.join(' / ')}` : ''}`);
     run.tries[tag] = tries + 1;
     run.lastClickAt = Date.now();
     await save(run);
+    if (!(await stillOn())) return halted();
     say(`Next: "${next.text}"`);
     press(next.el);
     await waitForChange(step);
@@ -208,5 +228,5 @@ export async function continueRun(say: Say, resume = false) {
   return stop(`Stopped after ${MAX_PAGES} pages`);
 }
 
-export const stopRun = () => save(null);
+export const stopRun = () => ask({ t: 'run:set', run: null });
 export type { Field };

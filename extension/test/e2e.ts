@@ -16,6 +16,7 @@ const tpl = (f: string) => JSON.parse(fs.readFileSync(path.join(here, '..', '..'
 const OPENING = 'I care about two things: create and challenge. This paragraph never changes.';
 const profile = tpl('profile.example.json');
 profile.fields = { ...profile.fields, veteran_status: 'No, I am not a protected veteran', graduation_month: 'May', race: 'Asian', ethnicity: 'No, not Hispanic or Latino', pronouns: 'He/him', school_start_month: 'August', school_start_year: '2024', gpa: '3.9', high_school_grad_year: '2020', address_zip: '02115', address_street: '1 Main St' };
+profile.facts.education[0].start = '2017-09';
 profile.cover_letter = { header: 'Jane Doe\njane@example.com', salutation: 'To the {company} Selection Committee,', opening: OPENING, examples: 'My experience paragraph.\n\nWhy OtherCo paragraph.', closing: 'Sincerely,\n\nJane Doe' };
 const pdf = (name: string, text: string) => ({ name, type: 'application/pdf', size: text.length, data: Buffer.from(text).toString('base64') });
 
@@ -39,7 +40,7 @@ const runs = () => sw.evaluate(async () => Object.keys(await chrome.storage.sess
 
 const panel = (p: Page) => p.locator('#jobdemon-host');
 const status = (p: Page) => panel(p).locator('.t').innerText().catch(() => '');
-const needsText = (p: Page) => panel(p).locator('.n').innerText().catch(() => '');
+const needsText = (p: Page) => panel(p).locator('.n').textContent().then((t) => t ?? '', () => '');
 /** Open a job, press a widget button, and wait until the run has finished (in whichever tab it ends up). */
 async function run(url: string, button = 'Continue', timeout = 90000): Promise<Page> {
   const page = await open(url);
@@ -95,7 +96,8 @@ try {
   check('non-compete answered from the answer bank', (await val(p1, '#noncompete')) === 'No');
   check('follow-up to a "No" answer is left blank', (await val(p1, '#noncompete_explain')) === '');
   check('custom dropdown picked from its list', (await val(p1, '#country')) === 'United States +1', await val(p1, '#country'));
-  await panel(p1).locator('summary', { hasText: 'Cover letter' }).click();
+  await panel(p1).locator('button[aria-label=More]').click();
+  await panel(p1).locator('[role=menuitem]', { hasText: 'Cover letter' }).click();
   await panel(p1).locator('pre').filter({ hasText: 'Selection Committee' }).waitFor({ timeout: 8000 }).catch(() => {});
   check("the widget shows this job's cover letter", (await panel(p1).locator('pre').textContent()) === letter);
 
@@ -104,7 +106,7 @@ try {
   const a3 = await item(u(3));
   check('missing required data is left for you, by name', a3?.status === 'needs_you' && a3.needs.some((n) => /clearance/i.test(n)), `${a3?.status}: ${a3?.needs}`);
   check('it keeps filling past a question it cannot answer', (await val(p3, '#first_name')) === 'Jane' && (await val(p3, '#why')).length > 20);
-  check('the widget lists the fields that need you', /clearance/i.test(await panel(p3).locator('.n').innerText()));
+  check('the widget lists the fields that need you', /clearance/i.test(await needsText(p3)));
 
   // Hover a field: its own button fills just that one.
   const p4 = await open(u(4));
@@ -115,9 +117,20 @@ try {
   for (let i = 0; i < 20 && !(await val(p4, '#first_name')); i++) await sleep(250);
   await sleep(1500); // the field's own fill finishes (it checks the field shows the answer)
   check('the button beside a field fills just that field', (await val(p4, '#first_name')) === 'Jane' && (await val(p4, '#email')) === '');
-  await panel(p4).locator('button', { hasText: 'Fill this page' }).click();
+  await panel(p4).locator('button', { hasText: 'Fill page' }).click();
   await settle(p4);
   check('"Fill this page" fills the rest', (await val(p4, '#email')) === 'jane@example.com' && (await val(p4, '#why')).length > 20 && (await item(u(4)))?.status === 'filled', `${await val(p4, '#email')} ${(await item(u(4)))?.status} ${await needsText(p4)}`);
+
+  // Stop: the field it's on finishes, nothing after it, and it stays stopped.
+  const ps = await open(u(1, '?stop=1'));
+  await panel(ps).locator('button', { hasText: 'Continue' }).click();
+  await sleep(1200);
+  await panel(ps).locator('button', { hasText: 'Stop' }).click();
+  await sleep(1500);
+  const filledAtStop = await ps.locator('#application-form input[type=text]:not([value=""]), #application-form input:not([type])').evaluateAll((els) => els.filter((e) => (e as HTMLInputElement).value).length);
+  await sleep(4000);
+  const filledLater = await ps.locator('#application-form input[type=text], #application-form input:not([type])').evaluateAll((els) => els.filter((e) => (e as HTMLInputElement).value).length);
+  check('Stop stops mid-page and stays stopped', /Stopped/.test(await status(ps)) && filledLater === filledAtStop && (await val(ps, '#why')) === '' && !(await runs()) && (await panel(ps).locator('button', { hasText: 'Continue' }).isEnabled()), `${await status(ps)}: ${filledAtStop} → ${filledLater}`);
 
   // Getting to the form: tabs, multi-step forms, new tabs, embedded forms.
   const p5 = await run(u(5));
@@ -152,6 +165,18 @@ try {
   check('never fills a "robots only" trap field', (await val(p12, '#trap')) === '');
   const p17 = await run(u(17));
   check('careers page with a job search: skips the search boxes and fills the embedded application', (await p17.frameLocator('iframe').locator('#first_name').inputValue()) === 'Jane' && (await val(p17, '#kw')) === '' && (await val(p17, '#loc')) === '');
+  // 18: IBM-style dropdowns drawn over a hidden select, and unnumbered education rows with month boxes.
+  const p18 = await run(u(18));
+  check('a dropdown drawn over a hidden select is filled through the select', (await val(p18, '#ctry')) === 'US' && (await p18.locator('#ctry + .select2 .face, #ctry ~ span .face').first().innerText()) === 'United States', await val(p18, '#ctry'));
+  check("a drawn dropdown that doesn't follow its select is picked through its own list", (await p18.locator('#citface').innerText()) === 'United States' && (await val(p18, '#cit')) === 'US', `${await p18.locator('#citface').innerText()} / ${await val(p18, '#cit')}`);
+  check('an already-chosen dropdown is not flagged (its choice is not part of the question)', !/State/.test(await needsText(p18)) && (await val(p18, '#state')) === 'MA', await needsText(p18));
+  check('unnumbered repeating rows are told apart: row 1 gets school 1', (await val(p18, '#deg0')) === 'BS Computer Science' && (await val(p18, '#degsample')) === '');
+  check('a month box gets YYYY-MM', (await val(p18, '#sd0')) === '2017-09', await val(p18, '#sd0'));
+  await panel(p18).locator('button', { hasText: 'Fill page' }).click();
+  await settle(p18);
+  check('repeating rows: adds one per job, and filling again adds no more', (await p18.locator('#wrows .row:not([hidden])').count()) === 1 && (await val(p18, '#w0-0')) === 'Acme Corp', `${await p18.locator('#wrows .row:not([hidden])').count()} rows`);
+  check("row 2 isn't given school 1's details", (await val(p18, '#deg1')) === '' && (await val(p18, '#sd1')) === '');
+
   check('nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);
 
   // Workday look-alike: Apply → start option → sign-in wall (you) → five steps → stops at Submit.
@@ -211,12 +236,25 @@ try {
   // 16: a careers site whose Apply opens Workday in a new tab.
   const p16 = await run(u(16), 'Continue', 120000);
   check('careers site handing on to Workday in a new tab: carries on there to Submit', await p16.locator('#wsubmit').isVisible().catch(() => false), `${p16.url()}: ${await status(p16)}`);
-  check('Submit never clicked', stats.posts === 0 && submissions.length === 0);
+  check('the bot never clicked Submit', stats.posts === 0 && submissions.length === 0);
 
-  // Mark submitted: ✓ marks it applied and closes the tab, no pop-up.
-  await panel(p1).locator('button[aria-label="Mark submitted"]').click();
-  for (let i = 0; i < 20 && !p1.isClosed(); i++) await sleep(250);
-  check('✓ marks it submitted and closes its tab', p1.isClosed() && (await item(u(1)))?.status === 'applied');
+  // The bar shows itself only on job applications; the toolbar icon brings it up anywhere.
+  const plain = await ctx.newPage();
+  await plain.goto(u(9));
+  await sleep(5000);
+  check('no bar on a page with no application', (await panel(plain).count()) === 0);
+  await sw.evaluate(async (url) => { for (const t of await chrome.tabs.query({ url })) await chrome.tabs.sendMessage(t.id!, { t: 'show' }, { frameId: 0 }).catch(() => {}); }, u(9));
+  check('the toolbar icon shows it anyway', await panel(plain).locator('button', { hasText: 'Continue' }).isVisible({ timeout: 3000 }).catch(() => false));
+
+  // Your own Submit: it counts as applied only once it goes through.
+  await p3.locator('button[type=submit]').click(); // required fields still empty: the browser refuses it
+  await sleep(3000);
+  check('a Submit that fails validation does not count as applied', (await item(u(3)))?.status === 'needs_you');
+  await Promise.all([p1.waitForURL(/jobs\/1/, { timeout: 10000 }), p1.locator('button[type=submit]').click()]);
+  for (let i = 0; i < 30 && (await item(u(1)))?.status !== 'applied'; i++) await sleep(500);
+  check('your Submit that goes through marks it applied, and the tab stays open', (await item(u(1)))?.status === 'applied' && !p1.isClosed() && submissions.length === 1);
+  await panel(p1).locator('.t').filter({ hasText: 'Submitted' }).waitFor({ timeout: 5000 }).catch(() => {});
+  check('the bar says it was marked applied', /Submitted/.test(await status(p1)), await status(p1));
 
   // The extension's own pages.
   const dash = await ctx.newPage();

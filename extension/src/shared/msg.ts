@@ -15,11 +15,13 @@ export type ToBackground =
   | { t: 'history'; patch: Partial<HistoryItem> }
   | { t: 'run:get' }
   | { t: 'run:set'; run: Run | null }
-  | { t: 'frames'; op: 'fill' | 'hover'; retry?: boolean }
-  | { t: 'close' }
+  | { t: 'frames'; op: 'fill' | 'hover' | 'stop'; retry?: boolean }
+  | { t: 'submit:pending' }
+  | { t: 'submit:get' }
+  | { t: 'submit:done'; ok: boolean }
   | { t: 'open'; page: 'setup' | 'dashboard' | 'letter' };
 
-export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'hover' } | { t: 'show' };
+export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'hover' } | { t: 'show' } | { t: 'applied' } | { t: 'stop' };
 
 export type Reply<T> = { ok: true; v: T } | { ok: false; error: string };
 export type AnswerReply = Answer;

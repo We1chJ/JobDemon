@@ -18,6 +18,7 @@ export interface Field {
   error?: string; // the page's message for this field
   box: HTMLElement; // the question's container
   els: HTMLElement[]; // its controls (one per option for radios, checkbox lists, button groups, date parts)
+  face?: HTMLElement; // the dropdown drawn over a hidden <select>, when there is one
 }
 export interface Button { el: HTMLElement; text: string; autoId: string; footer: boolean }
 export interface Section { add: HTMLElement; heading: string; entries: number }
@@ -82,8 +83,20 @@ export function readStep(): Step {
     if (btns.length >= 2 && btns.some(shown)) buttonGroups.set(cb, btns);
   }
   const inGroup = new Set([...buttonGroups.values()].flat());
+  // A native <select> hidden behind a dropdown drawn over it (a standard combobox beside it): the select is the
+  // question, it holds the real options and the current choice; the drawn box is only its face.
+  const faces = new Map<HTMLElement, HTMLElement>();
+  // Hidden for real, or shrunk to a pixel and hidden from screen readers.
+  const tucked = (e: HTMLElement) => { const r = e.getBoundingClientRect(); return !shown(e) || r.width <= 2 || r.height <= 2 || e.getAttribute('aria-hidden') === 'true'; };
+  for (const sel of all('select')) {
+    if (!tucked(sel) || !sel.parentElement) continue;
+    const near = [sel.parentElement, sel.parentElement.parentElement].filter((p): p is HTMLElement => !!p);
+    const face = near.flatMap((p) => all('[role=combobox]', p)).find((f) => shown(f) && !f.contains(sel));
+    if (face) faces.set(sel, face);
+  }
+  const isFace = (el: HTMLElement) => [...faces.values()].some((f) => f === el || f.contains(el));
   const ctrls = all(SEL).filter((el) => !(el as HTMLInputElement).disabled && !el.closest(CHROME) && el.getAttribute('aria-haspopup') !== 'menu'
-    && !innerOfCombo(el) && (buttonGroups.has(el) || (usable(el) && !helper(el))) && !isTrap(el)
+    && !innerOfCombo(el) && (buttonGroups.has(el) || faces.has(el) || (usable(el) && !helper(el) && !isFace(el))) && !isTrap(el)
     && !inSearchForm(el) && !SEARCH_LABEL.test(`${firstText(ownLabels(el))} ${el.getAttribute('aria-label') || ''} ${input(el).placeholder || ''}`));
 
   // ── Questions: radios / checkbox lists / date boxes grouped, everything else on its own ──
@@ -144,11 +157,27 @@ export function readStep(): Step {
     const title = heads.find((h) => !/\s\d+$/.test(textOf(h)));
     return { add: b, heading: textOf(title) || (numbered[0] ? textOf(numbered[0]).replace(/\s\d+$/, '') : `Section ${i + 1}`), entries: numbered.length, box, numbered };
   });
+  const labelsOf = (el: Element) => all('label, legend', el).map((l) => noStar(l.innerText)).filter(Boolean).join('|');
+  // Rows of a repeating section with no numbered headings (e.g. one row per school): the same set of questions
+  // repeated in sibling boxes. The row's place among the visible ones is its number.
+  const rowOf = (el: Element) => {
+    let a: Element = el;
+    for (let k = 0; k < 8 && a.parentElement && a.parentElement !== document.body; k++, a = a.parentElement) {
+      const mine = labelsOf(a);
+      if (!mine.includes('|')) continue; // a row asks several questions
+      // Repeating = at least two such boxes, counting a hidden template row the site copies for "Add".
+      const rows = [...a.parentElement.children].filter((c) => c.tagName === a.tagName && labelsOf(c) === mine);
+      if (rows.length < 2) continue;
+      const head = all(HEADS).filter((h) => (h.compareDocumentPosition(a.parentElement!) & Node.DOCUMENT_POSITION_FOLLOWING) && textOf(h) && shown(h)).pop();
+      return `${textOf(head) || 'Entry'} ${rows.filter(shown).indexOf(a) + 1}`;
+    }
+    return '';
+  };
   const entryOf = (el: Element) => {
     const sec = sections.find((s) => s.box.contains(el));
-    if (!sec) return '';
+    if (!sec) return rowOf(el);
     const before = sec.numbered.filter((h) => h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
-    return textOf(before[before.length - 1]);
+    return textOf(before[before.length - 1]) || rowOf(el);
   };
 
   // ── Each question: label, kind, value, error ──
@@ -224,13 +253,15 @@ export function readStep(): Step {
     } else if (kind === 'pick') value = pickValue(el, box);
     else if (kind === 'file') value = input(el).files?.[0]?.name || (textOf(box).match(/[^\s/\\]+\.(pdf|docx?|txt|rtf)\b/i) || [])[0] || '';
     else value = clean(el.isContentEditable ? el.innerText : input(el).value);
+    // Some sites put the current choice inside the label (for screen readers): it isn't part of the question.
+    if (value && label.length > value.length && label.endsWith(value)) label = label.slice(0, -value.length).trim();
     // The page's message for this field: linked by aria (aria-invalid + aria-describedby), or shown inside it.
     const linked = g.els.filter((c) => c.getAttribute('aria-invalid') === 'true').flatMap((c) => byIds(`${c.getAttribute('aria-errormessage') || ''} ${c.getAttribute('aria-describedby') || ''}`)).filter(shown).map(textOf).filter(Boolean);
     const inside = all('[role=alert], [id*="error" i], [class*="error" i], [data-automation-id*="error" i]', box).filter(shown).map(textOf).filter(Boolean);
     const entry = entryOf(box);
     return {
       key: `${aid(box) || input(el).name || el.id || ''}|${entry}|${label}`, kind, label, entry: entry || undefined, required, value, options, dateParts,
-      editable: kind === 'pick' && el.tagName === 'INPUT', error: linked[0] || inside[0] || undefined, box, els: kind === 'buttons' ? g.els : g.els,
+      editable: kind === 'pick' && el.tagName === 'INPUT', error: linked[0] || inside[0] || undefined, box, els: g.els, face: faces.get(el),
     };
   });
 
@@ -249,7 +280,9 @@ export function readStep(): Step {
   const alerts = all('[data-automation-id*="errorBanner" i], [role=alert]').filter(shown).map(textOf)
     .filter((t) => t && /error|required|invalid|must|please (enter|select|fix)/i.test(t));
   const pw = all<HTMLInputElement>('input[type=password]').find((p) => { const r = p.getBoundingClientRect(); return r.width > 30 && r.height > 8 && shown(p); });
-  return { name: name.slice(0, 80), progress, signIn: !!pw, fields, buttons, sections: sections.map(({ add, heading, entries }) => ({ add, heading, entries })), errors: [...new Set(alerts)].slice(0, 5) };
+  // A section's entries: its numbered headings, or (sites without them) the rows its questions sit in.
+  const entries = (sec: (typeof sections)[number]) => Math.max(sec.entries, new Set(fields.filter((f) => f.entry && sec.box.contains(f.box)).map((f) => f.entry)).size);
+  return { name: name.slice(0, 80), progress, signIn: !!pw, fields, buttons, sections: sections.map((sec) => ({ add: sec.add, heading: sec.heading, entries: entries(sec) })), errors: [...new Set(alerts)].slice(0, 5) };
 }
 
 /** Company, role and job description text read off the page. */
