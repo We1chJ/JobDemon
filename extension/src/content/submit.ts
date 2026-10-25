@@ -9,7 +9,9 @@ import { log } from './log.js';
 const SUBMIT = /^(submit( (my |your )?application)?|send( (my )?application)?|finish( application)?|complete( (my )?application)?)$/i;
 const CONFIRMED = /thank(s| you) for (applying|your application|your interest|submitting)|application (has been |was )?(received|submitted|complete)|we('ve| have) received your application|successfully (submitted|applied)|you('ve| have) (successfully )?applied|application submitted/i;
 
-const textOf = (el: Element) => ((el as HTMLElement).innerText || (el as HTMLInputElement).value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+const own = (el: Element) => ((el as HTMLElement).innerText || (el as HTMLInputElement).value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+// A button drawn inside a web component may show its words from outside it (the component's own text).
+const textOf = (el: Element) => own(el) || own(((el.getRootNode() as ShadowRoot).host as Element | undefined) ?? el);
 const failed = () => { const s = readStep(); return s.errors.length > 0 || s.fields.some((f) => f.error); };
 const confirmed = () => CONFIRMED.test(document.body?.innerText ?? '');
 
@@ -36,7 +38,8 @@ async function submitted(button: Element) {
 export function watchSubmits() {
   document.addEventListener('click', (e) => {
     if (!e.isTrusted) return;
-    const b = (e.target as Element)?.closest?.('button, input[type=submit], [role=button], a[role=button]');
+    // The element really clicked, even inside a web component (the event's target is the component itself).
+    const b = (e.composedPath()[0] as Element | undefined)?.closest?.('button, input[type=submit], [role=button], a[role=button]');
     if (b && SUBMIT.test(textOf(b))) void submitted(b);
   }, true);
 }

@@ -5,7 +5,7 @@
 import { ask, type FillReport, type Run } from '../shared/msg.js';
 import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
-import { readJob, readStep, type Button, type Field, type Step } from './read.js';
+import { inside, readJob, readStep, type Button, type Field, type Step } from './read.js';
 import { WIDGETS, key, press, sleep } from './widgets.js';
 import { log, snapshot } from './log.js';
 
@@ -98,7 +98,7 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
 /** Fill one field: the one holding this control. Overwrites what's there. */
 export async function fillOne(control: Element, say: Say) {
   const step = readStep();
-  const f = step.fields.find((x) => x.els.includes(control as HTMLElement)) ?? step.fields.find((x) => x.box.contains(control));
+  const f = step.fields.find((x) => x.els.includes(control as HTMLElement)) ?? step.fields.find((x) => inside(x.box, control));
   if (!f) return say('Not a question JobDemon can read');
   const handler = WIDGETS[f.kind];
   if (!handler) return say(`Can't fill "${f.label}" (unrecognised control)`);

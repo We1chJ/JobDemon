@@ -5,7 +5,7 @@
 import { unanswered } from '../shared/answer.js';
 import { ask, type FileReply } from '../shared/msg.js';
 import type { Answer, Question } from '../shared/types.js';
-import { readStep, shown, type Field, type WidgetKind } from './read.js';
+import { everywhere, inside, readStep, shown, type Field, type WidgetKind } from './read.js';
 import { log } from './log.js';
 
 export interface Deps { previous?: { prompt: string; answer: string }; feedback?: string }
@@ -45,7 +45,9 @@ export function press(el: HTMLElement) {
   el.click();
 }
 const KEYS: Record<string, number> = { Escape: 27, Enter: 13, ArrowDown: 40, Tab: 9 };
-export function key(name: keyof typeof KEYS, el: Element = document.activeElement ?? document.body) {
+/** The element with focus, inside whichever component holds it. */
+const focused = () => { let a: Element | null = document.activeElement; while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement; return a ?? document.body; };
+export function key(name: keyof typeof KEYS, el: Element = focused()) {
   const o = { key: name, code: name, keyCode: KEYS[name], which: KEYS[name], bubbles: true, cancelable: true, composed: true };
   el.dispatchEvent(new KeyboardEvent('keydown', o));
   el.dispatchEvent(new KeyboardEvent('keyup', o));
@@ -67,7 +69,8 @@ const leave = (el: HTMLElement) => { el.dispatchEvent(new FocusEvent('focusout',
 
 /** Options showing right now (outside the field, or inside it but not already chosen). */
 function visibleOptions(f: Field): HTMLElement[] {
-  const opts = [...document.querySelectorAll<HTMLElement>(OPTION)].filter((n) => shown(n) && !(f.box.contains(n) && n.getAttribute('aria-selected') === 'true'));
+  // Lists may be drawn inside a web component: look through them too.
+  const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true'));
   return opts.filter((n) => !opts.some((m) => m !== n && m.contains(n)));
 }
 const optLabel = (n: HTMLElement) => (n.getAttribute('data-automation-label') || n.innerText || n.textContent || '').trim();
@@ -144,7 +147,7 @@ async function choose(f: Field, d: Deps): Promise<Result> {
     await sleep(100);
     // Some sites ignore clicks on the control itself and only react to its label.
     if (isOn() !== on) {
-      const label = (el.id && document.querySelector<HTMLElement>(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label');
+      const label = (el.id && (el.getRootNode() as ParentNode).querySelector<HTMLElement>(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label');
       if (label) { press(label); await sleep(100); }
     }
     if (isOn() !== on) return notDone(q, unanswered(q, `couldn't ${on ? 'select' : 'clear'} "${candidates[k]}" on the page`));

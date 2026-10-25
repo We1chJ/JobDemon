@@ -202,6 +202,14 @@ try {
   check('the question underneath a heading is in the report', /which team you would prefer/.test(f19(/DELTA/)?.details ?? ''));
   check('linked help text and the box\'s placeholder are part of the question', /proud of/.test(f19(/^Short answer/)?.details ?? '') && /2-3 sentences/.test(f19(/^Short answer/)?.details ?? ''), f19(/^Short answer/)?.details);
 
+  // 20: a form built from web components (fields kept in their own hidden trees, some closed).
+  const p20 = await run(u(20));
+  const v20 = (tag: string, name: string) => p20.evaluate(([t, n]) => (document.querySelector(`${t}[name=${n}]`) as unknown as { value: string }).value, [tag, name]);
+  check('web components: text boxes inside them are filled (open and closed)', (await v20('x-text', 'fn20')) === 'Jane' && (await v20('x-text', 'em20')) === 'jane@example.com', `${await v20('x-text', 'fn20')} / ${await v20('x-text', 'em20')}`);
+  check('web components: radio buttons, dropdown and a checkbox whose words come from outside it', (await v20('x-radios', 'sp20')) === 'No' && (await v20('x-select', 'g20')) === 'Decline To Self Identify' && (await v20('x-check', 'pv20')) === 'checked',
+    `${await v20('x-radios', 'sp20')} / ${await v20('x-select', 'g20')} / ${await v20('x-check', 'pv20')}`);
+  check('web components: the Submit button drawn inside one is found, and not clicked', /click "Submit"/.test(await status(p20)) && stats.posts === 0, await status(p20));
+
   check("row 2 isn't given school 1's details", (await val(p18, '#deg1')) === '' && (await val(p18, '#sd1')) === '');
 
   check('nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);

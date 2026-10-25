@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -498,6 +498,33 @@ document.querySelectorAll('select.select2-hidden-accessible').forEach((s) => s.a
 <div><label>Veteran status<div><select id="vet19" name="vet19"><option value="">Select ...</option><option>I identify as one or more of the classifications of protected veteran listed above</option><option>I am not a protected veteran</option><option>I decline to self-identify for protected veteran status</option></select></div></label></div>
 <button type="button">Submit application</button></form></body></html>`);
   });
+  // 20: SmartRecruiters-style: every question, the consent box and the Submit button are web components that keep
+  // their controls in their own hidden tree (shadow DOM), some open, some closed; a checkbox's words come from outside it.
+  app.get('/jobs/20', (c) => c.html(`<!doctype html><html><head><title>${ROLES['20']} - Mockco</title></head><body><h1>${ROLES['20']}</h1>${JD}
+<x-form>
+<x-text name="fn20" label="First name" required></x-text>
+<x-text name="em20" label="Email" type="email" required closed></x-text>
+<x-radios name="sp20" label="Will you now or in the future require visa sponsorship?" options="Yes|No" required></x-radios>
+<x-select name="g20" label="Gender" options="Male|Female|Decline To Self Identify"></x-select>
+<x-check name="pv20" required closed><span slot="label">I have read and agree to the Privacy Statement</span></x-check>
+</x-form>
+<x-button>Submit</x-button>
+<script>
+const make = (tag, html, read) => customElements.define(tag, class extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({ mode: this.hasAttribute('closed') ? 'closed' : 'open' });
+    root.innerHTML = html(this);
+    this._root = root;
+  }
+  get value() { return read(this._root); }
+});
+make('x-form', () => '<form><slot></slot></form>', () => '');
+make('x-text', (h) => '<label for="i">' + h.getAttribute('label') + (h.hasAttribute('required') ? ' *' : '') + '</label><input id="i" type="' + (h.getAttribute('type') || 'text') + '"' + (h.hasAttribute('required') ? ' required' : '') + '>', (r) => r.querySelector('input').value);
+make('x-radios', (h) => '<fieldset><legend>' + h.getAttribute('label') + ' *</legend>' + h.getAttribute('options').split('|').map((o, i) => '<label><input type="radio" name="r" value="' + o + '"> ' + o + '</label>').join('') + '</fieldset>', (r) => (r.querySelector('input:checked') || {}).value || '');
+make('x-select', (h) => '<label for="s">' + h.getAttribute('label') + '</label><select id="s"><option value="">Select...</option>' + h.getAttribute('options').split('|').map((o) => '<option>' + o + '</option>').join('') + '</select>', (r) => { const s = r.querySelector('select'); return s.value ? s.options[s.selectedIndex].text : ''; });
+make('x-check', () => '<input type="checkbox" id="c" required><label for="c"><slot name="label"></slot> *</label>', (r) => r.querySelector('input').checked ? 'checked' : '');
+make('x-button', () => '<button type="button"><slot></slot></button>', () => '');
+</script></body></html>`));
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));
   // Has a visible CAPTCHA widget: must go to the human queue.

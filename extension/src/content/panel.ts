@@ -220,16 +220,19 @@ export function hover() {
   document.documentElement.append(btn);
   let target: Element | null = null, hideTimer = 0;
   const hide = () => { hideTimer = window.setTimeout(() => { btn.style.display = 'none'; }, 400); };
+  // The element really under the pointer, even inside a web component (the event's target is the component itself).
+  const under = (e: Event) => e.composedPath()[0] as Element | undefined;
+  const ours = (e: Event) => e.composedPath().some((n) => n === host || n === btn);
   document.addEventListener('mouseover', (e) => {
-    const t = (e.target as Element)?.closest?.(CONTROL);
-    if (!t || t.closest('#jobdemon-host') || (t as HTMLInputElement).disabled) return;
+    const t = under(e)?.closest?.(CONTROL);
+    if (!t || ours(e) || (t as HTMLInputElement).disabled) return;
     const r = t.getBoundingClientRect();
     if (r.width < 12 || r.height < 12) return;
     clearTimeout(hideTimer);
     target = t;
     Object.assign(btn.style, { display: 'block', left: `${Math.min(window.innerWidth - 28, r.right + 4)}px`, top: `${r.top + Math.max(0, (r.height - 24) / 2)}px` });
   }, true);
-  document.addEventListener('mouseout', (e) => { if ((e.target as Element)?.closest?.(CONTROL)) hide(); }, true);
+  document.addEventListener('mouseout', (e) => { if (under(e)?.closest?.(CONTROL)) hide(); }, true);
   btn.addEventListener('mouseenter', () => clearTimeout(hideTimer));
   btn.addEventListener('mouseleave', hide);
   addEventListener('scroll', () => { btn.style.display = 'none'; }, { passive: true, capture: true });
