@@ -96,7 +96,8 @@ export function showPanel(opts: { resume?: boolean } = {}) {
 
   // Open: wherever you last left it (top right to start). Docked: just the logo, tucked against the left or right
   // edge of the screen; click it to open, slide it along the edge, or drag it off the edge to open it there.
-  // Dragging the open bar to an edge docks it there, as if pulled by a magnet. All kept for this tab and site.
+  // Dragging the open bar to an edge docks it there, as if pulled by a magnet. Hiding tucks it against the nearer
+  // edge at the height it's at, and opening from the edge opens it right there. All kept for this tab and site.
   const SNAP = 48; // how close to an edge counts as "at the edge"
   const place = (x: number, y: number) => {
     const wd = host!.offsetWidth || 280, ht = host!.offsetHeight || 44;
@@ -111,14 +112,24 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     w.classList.toggle('left', d.side === 'left');
     return { side: d.side, y };
   };
-  /** Dock or open. Only your own actions are remembered (an automatic open, e.g. while a fill runs on, isn't). */
-  const mini = (on: boolean, remembered = true) => {
+  let placed = false; // once on screen, docking and opening start from where it is
+  /** Dock or open, at `at` when given. Only your own choice to dock or open is remembered (an automatic open, e.g. while a fill runs on, isn't). */
+  const mini = (on: boolean, remembered = true, at?: Dock | { x: number; y: number }) => {
+    const r = host!.getBoundingClientRect(), was = isMini(), wasLeft = w.classList.contains('left');
     w.classList.toggle('mini', on);
     [go, more].forEach((b) => (b.hidden = on));
     menu.hidden = true;
     logo.title = on ? 'Open JobDemon' : 'JobDemon';
-    if (on) dockAt(recall<Dock>(DOCK_KEY) ?? { side: 'right', y: Math.round(window.innerHeight * 0.4) });
-    else { w.classList.remove('left'); const p = recall<{ x: number; y: number }>(POS_KEY); if (p) place(p.x, p.y); else Object.assign(host!.style, { left: 'auto', right: '16px', top: '16px' }); }
+    if (on) {
+      const here: Dock | null = placed && !was ? { side: r.left + r.width / 2 < window.innerWidth / 2 ? 'left' : 'right', y: r.top } : null;
+      remember(DOCK_KEY, dockAt((at && 'side' in at ? at : null) ?? here ?? recall<Dock>(DOCK_KEY) ?? { side: 'right', y: Math.round(window.innerHeight * 0.4) }));
+    } else {
+      w.classList.remove('left');
+      const here = placed && was ? { x: wasLeft ? 8 : window.innerWidth - host!.offsetWidth - 8, y: r.top } : null;
+      const p = (at && 'x' in at ? at : null) ?? here ?? recall<{ x: number; y: number }>(POS_KEY);
+      if (p) remember(POS_KEY, place(p.x, p.y)); else Object.assign(host!.style, { left: 'auto', right: '16px', top: '16px' });
+    }
+    placed = true;
     showSub();
     if (remembered) remember(MINI_KEY, on);
   };
@@ -144,13 +155,13 @@ export function showPanel(opts: { resume?: boolean } = {}) {
       if (docked) {
         // Pulled well away from the edge: open it where it was dropped. Otherwise it stays docked at the new height.
         const away = side === 'left' ? ev.clientX > SNAP * 2 : ev.clientX < window.innerWidth - SNAP * 2;
-        if (away) { remember(POS_KEY, { x: ev.clientX - 20, y: ev.clientY - 20 }); mini(false); }
+        if (away) mini(false, true, { x: ev.clientX - 20, y: ev.clientY - 20 });
         else remember(DOCK_KEY, { side, y: ev.clientY - dy });
         return;
       }
       const box = host!.getBoundingClientRect();
       const edge = box.left < SNAP ? 'left' : box.right > window.innerWidth - SNAP ? 'right' : null;
-      if (edge) { remember(DOCK_KEY, { side: edge, y: box.top }); mini(true); } // pulled to the side: tuck it away
+      if (edge) mini(true, true, { side: edge, y: box.top }); // pulled to the side: tuck it away
       else remember(POS_KEY, last);
     };
     bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);

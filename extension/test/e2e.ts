@@ -129,8 +129,17 @@ try {
   await p4.mouse.move(6, 300, { steps: 5 });
   await p4.mouse.up();
   const snapped = (await panel(p4).locator('.mini.left').count()) === 1 && !(await panel(p4).locator('button', { hasText: 'Fill page' }).isVisible());
+  const hostBox = () => p4.locator('#jobdemon-host').boundingBox().then((b) => b!);
+  const dockedAt = await hostBox();
   await panel(p4).locator('.logo').click();
   check('dragging the bar to the side snaps it there and tucks it away; a click opens it', snapped && (await panel(p4).locator('button', { hasText: 'Fill page' }).isVisible()));
+  const openedAt = await hostBox();
+  check('opening from the side opens it right there', openedAt.x < 20 && Math.abs(openedAt.y - dockedAt.y) < 4, `docked ${dockedAt.x},${dockedAt.y} opened ${openedAt.x},${openedAt.y}`);
+  await panel(p4).locator('button[aria-label=More]').click();
+  await panel(p4).locator('[role=menuitem]', { hasText: 'Hide' }).click();
+  const hiddenAt = await hostBox();
+  check('Hide tucks it against the nearer edge at the same height', (await panel(p4).locator('.mini.left').count()) === 1 && Math.abs(hiddenAt.y - openedAt.y) < 4, `opened ${openedAt.x},${openedAt.y} hidden ${hiddenAt.x},${hiddenAt.y}`);
+  await panel(p4).locator('.logo').click();
   await panel(p4).locator('button', { hasText: 'Fill page' }).click();
   await settle(p4);
   check('"Fill this page" fills the rest', (await val(p4, '#email')) === 'jane@example.com' && (await val(p4, '#why')).length > 20 && (await item(u(4)))?.status === 'filled', `${await val(p4, '#email')} ${(await item(u(4)))?.status} ${await needsText(p4)}`);
