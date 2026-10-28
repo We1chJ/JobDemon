@@ -20,7 +20,7 @@ profile.facts.education[0].start = '2017-09';
 profile.cover_letter = { header: 'Jane Doe\njane@example.com', salutation: 'To the {company} Selection Committee,', opening: OPENING, examples: 'My experience paragraph.\n\nWhy OtherCo paragraph.', closing: 'Sincerely,\n\nJane Doe' };
 const pdf = (name: string, text: string) => ({ name, type: 'application/pdf', size: text.length, data: Buffer.from(text).toString('base64') });
 
-let failed = 0;
+let failed = 0, docked = 0;
 const check = (name: string, ok: boolean, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`); if (!ok) failed++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,7 +42,7 @@ const panel = (p: Page) => p.locator('#jobdemon-host');
 const status = (p: Page) => panel(p).locator('.t').innerText().catch(() => '');
 const needsText = (p: Page) => panel(p).locator('.n').textContent().then((t) => t ?? '', () => '');
 /** Open a job, press a widget button, and wait until the run has finished (in whichever tab it ends up). */
-async function run(url: string, button = 'Continue', timeout = 90000): Promise<Page> {
+async function run(url: string, button = 'Fill page', timeout = 90000): Promise<Page> {
   const page = await open(url);
   await panel(page).locator('button', { hasText: button }).click({ timeout: 15000 });
   return settle(page, timeout);
@@ -54,6 +54,9 @@ async function open(url: string) {
   if (!(await panel(page).waitFor({ timeout: 5000 }).then(() => true, () => false))) {
     await sw.evaluate(async (u) => { const [t] = await chrome.tabs.query({ url: u }); if (t?.id) await chrome.tabs.sendMessage(t.id, { t: 'show' }, { frameId: 0 }); }, url);
   }
+  // The bar starts docked against the side of the screen: open it.
+  await panel(page).locator('.bar').waitFor({ timeout: 5000 }).catch(() => {});
+  if (await panel(page).locator('.mini').count()) { docked++; await panel(page).locator('.bar').click(); }
   return page;
 }
 async function settle(page: Page, timeout = 90000) {
@@ -77,6 +80,7 @@ try {
 
   // 1: a whole one-page form, stopping at its Submit button.
   const p1 = await run(u(1));
+  check('the bar starts docked to the side of the screen, and opens with a click', docked >= 1 && (await panel(p1).locator('button', { hasText: 'Fill page' }).isVisible()));
   const a1 = await item(u(1));
   check('job 1 is filled and stops at the submit button', a1?.status === 'filled' && /Submit Application/.test(await status(p1)), `${a1?.status}: ${await status(p1)}`);
   check('company/role read off page', a1?.company === 'Mockco' && a1?.role === 'Backend Engineer', `${a1?.company} / ${a1?.role}`);
@@ -117,20 +121,30 @@ try {
   for (let i = 0; i < 20 && !(await val(p4, '#first_name')); i++) await sleep(250);
   await sleep(1500); // the field's own fill finishes (it checks the field shows the answer)
   check('the button beside a field fills just that field', (await val(p4, '#first_name')) === 'Jane' && (await val(p4, '#email')) === '');
+  // Drag the open bar to the side of the screen: it snaps there and tucks away; a click opens it again.
+  const logoBox = (await panel(p4).locator('.logo').boundingBox())!;
+  await p4.mouse.move(logoBox.x + 10, logoBox.y + 10);
+  await p4.mouse.down();
+  await p4.mouse.move(400, 300, { steps: 5 });
+  await p4.mouse.move(6, 300, { steps: 5 });
+  await p4.mouse.up();
+  const snapped = (await panel(p4).locator('.mini.left').count()) === 1 && !(await panel(p4).locator('button', { hasText: 'Fill page' }).isVisible());
+  await panel(p4).locator('.logo').click();
+  check('dragging the bar to the side snaps it there and tucks it away; a click opens it', snapped && (await panel(p4).locator('button', { hasText: 'Fill page' }).isVisible()));
   await panel(p4).locator('button', { hasText: 'Fill page' }).click();
   await settle(p4);
   check('"Fill this page" fills the rest', (await val(p4, '#email')) === 'jane@example.com' && (await val(p4, '#why')).length > 20 && (await item(u(4)))?.status === 'filled', `${await val(p4, '#email')} ${(await item(u(4)))?.status} ${await needsText(p4)}`);
 
   // Stop: the field it's on finishes, nothing after it, and it stays stopped.
   const ps = await open(u(1, '?stop=1'));
-  await panel(ps).locator('button', { hasText: 'Continue' }).click();
+  await panel(ps).locator('button', { hasText: 'Fill page' }).click();
   await sleep(1200);
   await panel(ps).locator('button', { hasText: 'Stop' }).click();
   await sleep(1500);
   const filledAtStop = await ps.locator('#application-form input[type=text]:not([value=""]), #application-form input:not([type])').evaluateAll((els) => els.filter((e) => (e as HTMLInputElement).value).length);
   await sleep(4000);
   const filledLater = await ps.locator('#application-form input[type=text], #application-form input:not([type])').evaluateAll((els) => els.filter((e) => (e as HTMLInputElement).value).length);
-  check('Stop stops mid-page and stays stopped', /Stopped/.test(await status(ps)) && filledLater === filledAtStop && (await val(ps, '#why')) === '' && !(await runs()) && (await panel(ps).locator('button', { hasText: 'Continue' }).isEnabled()), `${await status(ps)}: ${filledAtStop} → ${filledLater}`);
+  check('Stop stops mid-page and stays stopped', /Stopped/.test(await status(ps)) && filledLater === filledAtStop && (await val(ps, '#why')) === '' && !(await runs()) && (await panel(ps).locator('button', { hasText: 'Fill page' }).isEnabled()), `${await status(ps)}: ${filledAtStop} → ${filledLater}`);
 
   // Getting to the form: tabs, multi-step forms, new tabs, embedded forms.
   const p5 = await run(u(5));
@@ -210,13 +224,47 @@ try {
     `${await v20('x-radios', 'sp20')} / ${await v20('x-select', 'g20')} / ${await v20('x-check', 'pv20')}`);
   check('web components: the Submit button drawn inside one is found, and not clicked', /click "Submit"/.test(await status(p20)) && stats.posts === 0, await status(p20));
 
+  // 21: Greenhouse-style upload boxes: the resume box gets the resume, the cover letter box a cover letter.
+  // iCIMS-style: every step inside a frame. Apply and Next clicked inside it, the reload after the resume upload
+  // survived, the account's login left to you, then on to Submit once you've created it.
+  const w23 = await open(u(23));
+  await panel(w23).locator('button', { hasText: 'Fill page' }).click({ timeout: 15000 });
+  for (let i = 0; i < 160 && !/login and password/i.test(await status(w23)); i++) await sleep(500);
+  const f23 = w23.frameLocator('iframe');
+  check('embedded steps: Apply and Next clicked inside the frame, then waits for you to choose a login', /login and password.*Create Profile/i.test(await status(w23)), await status(w23));
+  check("embedded steps: the form reloading after the resume upload doesn't end the fill, and the resume is sent once", stats.parses === 1 && (await f23.locator('#ln23').inputValue()) === 'Doe', `${stats.parses} uploads, last name "${await f23.locator('#ln23').inputValue().catch(() => '?')}"`);
+  check('embedded steps: never types a login or password', (await f23.locator('#login23').inputValue()) === '' && (await f23.locator('#pw23').inputValue()) === '');
+  check('embedded steps: phones section keeps its one entry', (await f23.locator('#phones23 .row').count()) === 1);
+  await f23.locator('#login23').fill('janedoe');
+  await f23.locator('#pw23').fill('test-only-Password1!');
+  await f23.locator('#pw23b').fill('test-only-Password1!');
+  await f23.locator('button', { hasText: 'Create Profile' }).click();
+  const p23 = await settle(w23, 90000);
+  check('embedded steps: carries on after you create the account, to Submit', /Submit Application/.test(await status(p23)) && (await p23.frameLocator('iframe').locator('#auth23').evaluate((s: HTMLSelectElement) => s.value)) === 'Yes', await status(p23));
+  check('embedded steps: dropdown whose select is empty until its list opens is picked from the list', (await p23.frameLocator('iframe').locator('#ctry23').evaluate((s: HTMLSelectElement) => s.value)) === 'United States');
+  check('"How did you hear about us?" with no fitting option picks the first one', (await p23.frameLocator('iframe').locator('#src23').evaluate((s: HTMLSelectElement) => s.value)) === 'Career Fair');
+  const a23 = await item(u(23));
+  check('embedded steps: job title read from the form, not the careers page around it', a23?.role === 'Embedded Steps Engineer' && a23?.company === 'Mockco', `${a23?.company} / ${a23?.role}`);
+
+  const p22 = await run(u(22));
+  check('sections whose title counts entries ("Phones (1)"): no extra entries added',
+    (await p22.locator('#phones22 .row').count()) === 1 && (await p22.locator('#work22 .row').count()) === 1,
+    `${await p22.locator('#phones22 .row').count()} phones / ${await p22.locator('#work22 .row').count()} jobs`);
+
+  const p21 = await run(u(21));
+  check('upload boxes are told apart by their real question (Resume/CV vs Cover Letter)',
+    (await fileName(p21, '#resume21')) === 'resume.pdf' && /^Cover Letter/.test(await fileName(p21, '#cover21')), `${await fileName(p21, '#resume21')} / ${await fileName(p21, '#cover21')}`);
+  const rs21 = await p21.locator('#rs21 .single-value').innerText().catch(() => '');
+  check('react-select dropdown far below its label: question read, option without a role picked', rs21 === 'No, I am not a protected veteran', rs21);
+  check('month name typed into a number (MM) box as its number', (await val(p21, '#sm21')) === '8', await val(p21, '#sm21'));
+
   check("row 2 isn't given school 1's details", (await val(p18, '#deg1')) === '' && (await val(p18, '#sd1')) === '');
 
   check('nothing submitted after all the navigating', submissions.length === 0 && stats.posts === 0);
 
   // Workday look-alike: Apply → start option → sign-in wall (you) → five steps → stops at Submit.
   const w13 = await open(u(13));
-  await panel(w13).locator('button', { hasText: 'Continue' }).click({ timeout: 15000 });
+  await panel(w13).locator('button', { hasText: 'Fill page' }).click({ timeout: 15000 });
   for (let i = 0; i < 60 && !/Sign in/.test(await status(w13)); i++) await sleep(500);
   check('Workday: clicks Apply and a start option, then waits for you at sign-in', /Sign in/.test(await status(w13)), await status(w13));
   check('Workday: never types into the sign-in form', (await val(w13, '#em')) === '' && (await val(w13, '#pw')) === '');
@@ -244,16 +292,22 @@ try {
   check('Workday: consent box ticked', await p13.locator('#termsAndConditions').isChecked());
 
   // 14: a step that won't move on is retried once with the page's message, then reported.
-  const p14 = await run(u(14), 'Continue', 120000);
+  const p14 = await run(u(14), 'Fill page', 120000);
+  const clicks14 = await sw.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://localhost:4100/jobs/14*' });
+    const log = ((await chrome.storage.session.get(`log:${t.id}`))[`log:${t.id}`] ?? []) as { type?: string; button?: string }[];
+    return log.filter((e) => e.type === 'click' && e.button === 'Save and Continue').length;
+  });
+  check('a refused step is tried twice, even when the page redraws a control with a new id', clicks14 === 2, `${clicks14} clicks`);
   check("Workday: a step that won't advance is retried with the page's message, then reported", /didn't move on/.test(await status(p14)) && /Employee ID/.test(await needsText(p14)), `${await status(p14)} / ${await needsText(p14)}`);
   // Continue from here: you fix what stopped it, then it carries on to Submit.
   await p14.fill('#employeeId', 'E-12345');
-  await panel(p14).locator('button', { hasText: 'Continue' }).click();
+  await panel(p14).locator('button', { hasText: 'Fill page' }).click();
   const q14 = await settle(p14, 120000);
   check('Continue: carries on from the page you fixed, through every step, to Submit', (await q14.locator('#wsubmit').isVisible()) && (await val(q14, '#employeeId')) === 'E-12345', await status(q14));
 
   // 15: the same application built with standard markup only (no Workday names).
-  const p15 = await run(u(15), 'Continue', 120000);
+  const p15 = await run(u(15), 'Fill page', 120000);
   const v15 = (sel: string) => val(p15, sel);
   const chips15 = async (id: string) => (await p15.locator(`#${id}`).locator('xpath=..').locator('.chips [role=option]').allInnerTexts()).join(', ');
   check('Standard markup: every step filled, stops at "Submit application"', await p15.locator('#send').isVisible(), await status(p15));
@@ -269,7 +323,7 @@ try {
   check('Standard markup: native <select> declined for a demographic question', (await selected(p15, '#sex')) === 'Prefer not to say');
 
   // 16: a careers site whose Apply opens Workday in a new tab.
-  const p16 = await run(u(16), 'Continue', 120000);
+  const p16 = await run(u(16), 'Fill page', 120000);
   check('careers site handing on to Workday in a new tab: carries on there to Submit', await p16.locator('#wsubmit').isVisible().catch(() => false), `${p16.url()}: ${await status(p16)}`);
   check('the bot never clicked Submit', stats.posts === 0 && submissions.length === 0);
 
@@ -279,7 +333,7 @@ try {
   await sleep(5000);
   check('no bar on a page with no application', (await panel(plain).count()) === 0);
   await sw.evaluate(async (url) => { for (const t of await chrome.tabs.query({ url })) await chrome.tabs.sendMessage(t.id!, { t: 'show' }, { frameId: 0 }).catch(() => {}); }, u(9));
-  check('the toolbar icon shows it anyway', await panel(plain).locator('button', { hasText: 'Continue' }).isVisible({ timeout: 3000 }).catch(() => false));
+  check('the toolbar icon shows it anyway', await panel(plain).locator('button', { hasText: 'Fill page' }).isVisible({ timeout: 3000 }).catch(() => false));
 
   // Your own Submit: it counts as applied only once it goes through.
   await p3.locator('button[type=submit]').click(); // required fields still empty: the browser refuses it
@@ -295,7 +349,11 @@ try {
   const dash = await ctx.newPage();
   await dash.goto(`chrome-extension://${new URL(sw.url()).host}/pages/dashboard.html`);
   await dash.locator('.cc').first().waitFor({ timeout: 5000 }).catch(() => {});
-  check('Dashboard lists the applications with charts', (await dash.locator('.tbl tbody tr').count()) >= 10 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '1');
+  check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '1');
+  await dash.locator('a', { hasText: 'Show all applications' }).click();
+  await dash.locator('.tbl').waitFor({ timeout: 5000 }).catch(() => {});
+  const listed = await dash.locator('.tbl tbody tr').count(), pager = await dash.locator('.pager').innerText().catch(() => '');
+  check('Dashboard: "Show all applications" lists them 10 per page', listed === 10 && /Page 1 of [2-9]/.test(pager), `${listed} rows, "${pager}"`);
   const setup = ctx.pages().find((p) => p.url().endsWith('/pages/setup.html'))!;
   await setup.reload();
   check('Setup shows your saved profile', (await setup.locator('input[name=first_name]').inputValue()) === 'Jane' && (await setup.locator('#screening input:checked').count()) > 3);

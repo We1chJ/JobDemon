@@ -1,31 +1,36 @@
-// Filling and moving through an application, in the page:
-//   Fill this page  → every empty field on this page (and in forms embedded in it), one at a time
-//   Continue        → fill, then Apply / Next / Save and Continue, page after page, stopping at Submit
-// The bot never clicks Submit. "Continue" survives page loads: its state lives in the background.
-import { ask, type FillReport, type Run } from '../shared/msg.js';
+// Filling and moving through an application, in the page. "Fill page": fill every empty field on this page (and in
+// forms embedded in it), then Apply / Next / Save and Continue, page after page, stopping where the way on is Submit.
+// When the application runs inside a frame (iCIMS), the page drives it there: it reads the frame's buttons and
+// clicks them through the frame. The bot never clicks Submit. A run survives page loads: its state lives in the background.
+import { ask, type FillReport, type Look, type Run } from '../shared/msg.js';
 import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
-import { inside, readJob, readStep, type Button, type Field, type Step } from './read.js';
+import { inside, readJob, readStep, type Field, type Step } from './read.js';
 import { WIDGETS, key, press, sleep } from './widgets.js';
 import { log, snapshot } from './log.js';
 
 const MAX_ENTRIES = 6; // most entries the bot will add to one repeating section
 const MAX_PAGES = 40;
+const SIGN_IN_FIELDS = 3; // a sign-in page asks this little; a longer form with a password also creates your account
+const MAX_RELOADS = 3; // times a form may reload while being filled before the run stops trying
 // Ways in, in order: carry on with a draft already started, then a portal's start options, then Apply.
 const START = [
   { id: /^continueButton$/i, text: /^continue application$/i },
   { id: /autofillWithResume/i, text: /^autofill with resume$/i },
   { id: /applyManually/i, text: /^apply manually$/i },
-  { id: /adventureButton|applyButton/i, text: /^(apply( now| for this (job|position|role))?|start (your |my )?application|i'?m interested)$/i },
+  { id: /adventureButton|applyButton/i, text: /^(apply( now| online| for this (job|position|role)( online)?)?|start (your |my )?application|i'?m interested)$/i },
   { id: /^$/, text: /^application$/i }, // an "Application" tab beside the job description
 ];
 const NEXT = { id: /pageFooterNextButton|bottom-navigation-next-button/i, text: /^(save (and|&) continue|continue|next( step| page)?)$/i };
 const SUBMIT = /^(submit( (my )?application)?|send( application)?|finish|complete)$/i;
 // Buttons that send you to another account (apply with LinkedIn...): never the way into the form.
 const ELSEWHERE = /apply with|sign (in|up) with|log ?in with|continue with|import (from|my)|quick apply|use my (profile)/i;
+// The login and password of the account a form creates: yours to choose.
+const ACCOUNT = /^(log ?in|user ?(name|id)|password)\b/i;
 
+type Way = Look['buttons'][number];
 // By wording, preferring the page's footer (where Next lives); the portal's own button names as a fallback.
-const find = (buttons: Button[], b: { id: RegExp; text: RegExp }) =>
+const find = (buttons: Way[], b: { id: RegExp; text: RegExp }) =>
   buttons.find((x) => x.footer && b.text.test(x.text)) ?? buttons.find((x) => b.text.test(x.text)) ?? buttons.find((x) => x.autoId && b.id.test(x.autoId));
 
 /** What the widget shows: a status line, and (when given) the fields left for you. */
@@ -73,6 +78,12 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
     if (!f) break;
     tried.add(f.key);
     const label = f.entry ? `${f.entry} > ${f.label}` : f.label;
+    // A form that also creates your account (iCIMS "Create Profile"): its login and password are yours.
+    if (step.signIn && (ACCOUNT.test(f.label) || !!f.box.querySelector('input[type=password]'))) {
+      log({ type: 'field', q: label, kind: f.kind, status: 'yours', detail: 'the login of the account this form creates' });
+      needs.push(label);
+      continue;
+    }
     const handler = WIDGETS[f.kind];
     if (!handler) { log({ type: 'field', q: label, kind: f.kind, status: 'unrecognised control' }); if (f.required) needs.push(label); continue; }
     const i = step.fields.indexOf(f), above = step.fields[i - 1];
@@ -112,9 +123,39 @@ export async function fillOne(control: Element, say: Say) {
 /** This frame plus every form embedded in the page (e.g. a Greenhouse form on a company's careers site). */
 async function fillAll(say: Say, retry = false): Promise<FillReport> {
   const here = await fillFrame(say, retry);
-  const frames = top && !stopping ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
-  return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs] };
+  const frames: FillReport = top && !stopping ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
+  return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs], cut: frames.cut };
 }
+
+/** What this frame's page shows a run (see Look). */
+export function look(job = false): Look {
+  const s = readStep();
+  return {
+    signIn: s.signIn, fields: s.fields.length, name: s.name, tag: stepTag(s), errors: s.errors,
+    flagged: s.fields.filter((f) => f.error).map((f) => `${f.label}: ${f.error}`),
+    buttons: s.buttons.map(({ text, autoId, footer }) => ({ text, autoId, footer })), job: job ? readJob() : undefined,
+  };
+}
+/** Click this frame's button with these words. */
+export function clickButton(text: string) {
+  const b = readStep().buttons.find((x) => x.text === text);
+  if (b) press(b.el);
+  return !!b;
+}
+
+/** The page as the run sees it: this page, or the form embedded in it (the one asking the most). With no form
+ * anywhere yet, the ways in may be on the page or inside a frame (an iCIMS posting): all their buttons. */
+async function view(job = false): Promise<Look> {
+  const here = look(job);
+  const frames = await ask<Look[]>({ t: 'frames:look', job }).catch(() => [] as Look[]);
+  const form = [here, ...frames].filter((l) => l.fields || l.signIn).sort((a, b) => b.fields - a.fields)[0];
+  return form ?? { ...here, buttons: [...here.buttons, ...frames.flatMap((l) => l.buttons)] };
+}
+const click = async (b: Way) => {
+  if (b.frame === undefined) clickButton(b.text);
+  else await ask({ t: 'frames:click', frameId: b.frame, text: b.text });
+};
+const where = (v: Look) => `${v.frame ?? 'page'}#${v.tag}`;
 
 /** The job portal this page belongs to ('' when it isn't a known one). */
 export const portalName = (host = location.hostname) => portalOf(host);
@@ -122,6 +163,8 @@ export const portalName = (host = location.hostname) => portalOf(host);
 async function begin(say: Say) {
   const job = readJob();
   await ask({ t: 'job', job, portal: portalName() || undefined });
+  // A posting or form embedded in the page may name the job better than the page around it.
+  for (const l of await ask<Look[]>({ t: 'frames:look', job: true }).catch(() => [] as Look[])) if (l.job) await ask({ t: 'job', job: l.job, fix: true });
   await ask({ t: 'history', patch: { status: 'in_progress' } });
   say('Reading your Setup');
 }
@@ -131,61 +174,70 @@ async function end(report: FillReport, say: Say, final: string) {
   say(final, report.needs);
 }
 
-/** Fill this page. */
-export async function fillThisPage(say: Say) {
-  stopping = false;
-  await begin(say);
-  const r = await fillAll(say);
-  if (stopping) return void say('Stopped.', r.needs);
-  await end(r, say, r.fields ? `Filled ${r.filled} field${r.filled === 1 ? '' : 's'}. Check the page.` : 'No application questions here.');
-  return r;
-}
 
 const newRun = (): Run => ({ active: true, filledAny: false, tries: {}, started: [], lastClickAt: Date.now() });
 // Once you press Stop, nothing here may bring the run back.
 const save = (run: Run | null) => (stopping && run ? Promise.resolve() : ask({ t: 'run:set', run }));
-const stepTag = (s: Step) => `${location.pathname}#${s.name}#${s.progress?.at ?? ''}#${s.fields.map((f) => f.key).sort().join(',')}`;
+// The same step, by its questions' wording (internal ids can change every time a page redraws).
+const stepTag = (s: Step) => `${location.pathname}#${s.name}#${s.progress?.at ?? ''}#${[...new Set(s.fields.map((f) => (f.entry ? `${f.entry} > ${f.label}` : f.label)))].sort().join(',')}`;
 
-/** After a click: wait until the page moves on or shows an error (up to 20 s). A full page load ends this script. */
-async function waitForChange(before: Step) {
-  const url = location.href, tag = stepTag(before);
+/** After a click: wait until the page (or its embedded form) moves on or shows an error (up to 20 s). A full page
+ * load ends this script. */
+async function waitForChange(before: Look) {
+  const url = location.href, tag = where(before);
   for (let waited = 0; waited < 20000; waited += 1000) {
     await sleep(1000);
-    const now = readStep();
-    if (location.href !== url || stepTag(now) !== tag || now.signIn || now.errors.length || now.fields.some((f) => f.error)) return;
+    const now = await view();
+    if (location.href !== url || where(now) !== tag || now.signIn || now.errors.length || now.flagged.length) return;
     if (!(await ask<Run | null>({ t: 'run:get' }))?.active) return; // stopped, or moved to a new tab
   }
 }
 
-/** Continue: from the page this tab shows, through the next pages, to Submit. */
+/** Fill page: from the page this tab shows, through the next pages, to Submit. */
 export async function continueRun(say: Say, resume = false) {
   stopping = false;
   let run = (resume && (await ask<Run | null>({ t: 'run:get' }))) || newRun();
   run.active = true;
   await save(run);
-  if (!resume) await begin(say);
+  if (!resume) { await ask({ t: 'uploads', clear: true }).catch(() => {}); await begin(say); }
   const stillOn = async () => !stopping && !!(await ask<Run | null>({ t: 'run:get' }))?.active;
   let report: FillReport = { fields: 0, filled: 0, needs: [] };
   const halted = () => say(stopping ? 'Stopped.' : Date.now() - run.lastClickAt < 10000 ? 'Carrying on in the tab that just opened' : 'Stopped.', stopping ? report.needs : undefined);
   const stop = async (msg: string) => { log({ type: 'continue ended', message: msg }); await save(null); await end(report, say, msg); };
+  // Wait while a sign-in shows (you sign in, or create the account), then carry on here or on the page that loads next.
+  const waitForYou = async (msg: string) => {
+    run.waiting = 'sign-in';
+    await save(run);
+    say(msg);
+    while ((await view()).signIn) { await sleep(2000); if (!(await stillOn())) return false; }
+    run.waiting = undefined;
+    await save(run);
+    await sleep(1500);
+    return true;
+  };
+  let reloads = 0;
 
   for (let page = 0; page < MAX_PAGES; page++) {
     if (!(await stillOn())) return halted();
-    // Sign-in / create account: wait for you, then carry on (here, or on the page that loads next).
-    if (readStep().signIn) {
-      run.waiting = 'sign-in';
-      await save(run);
-      say('Sign in or create your account. JobDemon carries on after.');
-      while (readStep().signIn) { await sleep(2000); if (!(await stillOn())) return halted(); }
-      run.waiting = undefined;
-      await save(run);
-      await sleep(1500);
-    }
+    const first = await view();
+    if (first.signIn && first.fields <= SIGN_IN_FIELDS && !(await waitForYou('Sign in or create your account. JobDemon carries on after.'))) return halted();
     report = await fillAll(say);
     if (!(await stillOn())) return halted();
-    const step = readStep();
+    // The form loaded again while being filled (some read your resume, then redraw the form with it): fill what's left.
+    if (report.cut) {
+      if (reloads >= MAX_RELOADS) return stop('The form keeps reloading while JobDemon fills it. Check it, then press Fill page to carry on.');
+      reloads++;
+      log({ type: 'form reloaded while filling' });
+      say('The form reloaded. Carrying on.');
+      await sleep(2500);
+      continue;
+    }
+    const step = await view(true);
+    if (step.frame !== undefined && step.job) await ask({ t: 'job', job: step.job, fix: true });
     const ways = step.buttons.filter((b) => !ELSEWHERE.test(b.text));
 
+    // Something was filled (an upload can leave a page with no questions): this is the application.
+    if (report.filled) run.filledAny = true;
     // Getting in: Apply, then a start option. The next page can take a few seconds to appear.
     if (!report.fields && !run.filledAny) {
       const start = START.map((b) => find(ways, b)).find((b) => b && !run.started.includes(b.text));
@@ -195,15 +247,21 @@ export async function continueRun(say: Say, resume = false) {
         await save(run);
         if (!(await stillOn())) return halted();
         say(`Opening the application: "${start.text}"`);
-        log({ type: 'click', button: start.text, why: 'way into the application' });
-        press(start.el);
+        log({ type: 'click', button: start.text, why: 'way into the application', in: start.frame === undefined ? 'page' : 'embedded form' });
+        await click(start);
         await waitForChange(step);
         continue;
       }
       if (Date.now() - run.lastClickAt < 20000) { say('Waiting for the form to appear'); await sleep(1500); continue; }
-      return stop("Couldn't find the application form. Open it, then press Continue.");
+      return stop("Couldn't find the application form. Open it, then press Fill page.");
     }
     if (report.fields) run.filledAny = true;
+    // A form that also creates your account: its login and password are yours. Carry on once it's created.
+    if (step.signIn) {
+      const create = step.buttons.find((b) => /create|register|sign ?up|continue|next/i.test(b.text));
+      if (!(await waitForYou(`Choose a login and password${create ? `, then click "${create.text}"` : ''}. JobDemon carries on after.`))) return halted();
+      continue;
+    }
 
     // Page done: Save and Continue, or stop at Submit.
     const next = find(ways, NEXT);
@@ -214,14 +272,14 @@ export async function continueRun(say: Say, resume = false) {
       return stop(submit ? `Done. Check it, then click "${submit.text}".` : 'Done. Check the page, then submit it.');
     }
     // Tries: 0 = first click; 1 = the page refused, answer its flagged fields again; 2 = second click; 3 = give up.
-    const tag = stepTag(step);
+    const tag = where(step);
     const tries = run.tries[tag] ?? 0;
-    const flagged = step.fields.filter((f) => f.error);
+    const flagged = step.flagged;
     if (tries === 1 && flagged.length) {
       run.tries[tag] = 2;
       await save(run);
       say(`The page flagged ${flagged.length} field${flagged.length === 1 ? '' : 's'}: answering again with its message`);
-      log({ type: 'retry', flagged: flagged.map((f) => `${f.label}: ${f.error}`) });
+      log({ type: 'retry', flagged });
       report = await fillAll(say, true);
       if (!(await stillOn())) return halted();
       continue;
@@ -232,8 +290,8 @@ export async function continueRun(say: Say, resume = false) {
     await save(run);
     if (!(await stillOn())) return halted();
     say(`Next: "${next.text}"`);
-    log({ type: 'click', button: next.text, why: 'next page', attempt: tries + 1 });
-    press(next.el);
+    log({ type: 'click', button: next.text, why: 'next page', attempt: tries + 1, in: next.frame === undefined ? 'page' : 'embedded form' });
+    await click(next);
     await waitForChange(step);
   }
   return stop(`Stopped after ${MAX_PAGES} pages`);

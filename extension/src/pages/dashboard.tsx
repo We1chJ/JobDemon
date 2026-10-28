@@ -143,6 +143,9 @@ function Charts({ s }: { s: Stats }) {
 const YOUR_TURN: HistoryStatus[] = ['needs_you', 'filled'];
 const ORDER: HistoryStatus[] = ['needs_you', 'filled', 'in_progress', 'applied'];
 const FILTERS: [string, string][] = [['all', 'All'], ['needs_you', 'Needs you'], ['filled', 'Ready to submit'], ['applied', 'Applied']];
+const PAGE = 10;
+// The full list stays hidden until you open it; its filter and page live in the address.
+const link = (p: { s?: string; p?: number }) => `?${new URLSearchParams({ list: '1', ...(p.s && p.s !== 'all' ? { s: p.s } : {}), ...(p.p && p.p > 1 ? { p: String(p.p) } : {}) })}`;
 
 const what = (a: HistoryItem) => (a.status === 'filled' ? 'Filled in · review and submit' : a.needs.length ? `${a.needs.length} field${a.needs.length === 1 ? '' : 's'} need you: ${a.needs.join(' · ')}` : 'Needs a look');
 const title = (a: HistoryItem) => html`<a class="app-title" href="${a.url}" target="_blank" rel="noopener">${a.role || 'Untitled role'}</a>${a.company ? html` <span class="muted">· ${a.company}</span>` : ''}`;
@@ -151,13 +154,16 @@ const letter = (a: HistoryItem) => (a.letter ? html`<details class="peek"><summa
 
 let root: ReturnType<typeof createRoot> | null = null;
 async function draw() {
-  const filter = new URLSearchParams(location.search).get('s') ?? 'all';
+  const q = new URLSearchParams(location.search);
+  const filter = q.get('s') ?? 'all', open = q.get('list') === '1';
   const apps = Object.values(await store.history()).filter((a) => a.status !== 'removed').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const settings = await store.settings(), profile = await store.profile(), resume = await store.file('resume');
   const missing = [!(settings.typesafeKey && settings.openaiKey) && 'add your AI keys', !resume && 'upload your resume', !profile.fields.first_name && 'fill in your profile'].filter(Boolean);
   const shown = apps.filter((a) => filter === 'all' || a.status === filter).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
   const yourTurn = apps.filter((a) => YOUR_TURN.includes(a.status));
   const n = (s: string) => (s === 'all' ? apps.length : apps.filter((a) => a.status === s).length);
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
+  const page = Math.min(pages, Math.max(1, Number(q.get('p')) || 1));
 
   root?.unmount();
   render('dashboard', html`
@@ -170,15 +176,17 @@ ${yourTurn.length ? html`<section class="sec" aria-labelledby="turn-h">
 </section>` : ''}
 <section class="sec" aria-labelledby="list-h">
 <h2 id="list-h" class="sr">Applications</h2>
-<p class="note">Open a job application in any tab and use the JobDemon widget on the page (or click the toolbar icon): <b>Fill this page</b>, or <b>Continue</b> to go page by page up to Submit.</p>
-<nav class="filters" aria-label="Filter by status">${FILTERS.map(([k, l]) => html`<a href="${k === 'all' ? '?' : `?s=${k}`}" ${filter === k ? raw('aria-current="true"') : ''}>${l} <b>${n(k)}</b></a>`)}</nav>
-${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Role</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.map((a) => html`<tr>
+<p class="note">Open a job application in any tab and use the JobDemon widget on the page (or click the toolbar icon): <b>Fill page</b> fills it and goes on page by page, stopping at Submit.</p>
+<a class="btn btn-sm" href="${open ? '?' : link({})}" aria-expanded="${open}">${open ? 'Hide' : 'Show'} all applications <b>${apps.length}</b></a>
+${open ? html`<nav class="filters" aria-label="Filter by status">${FILTERS.map(([k, l]) => html`<a href="${link({ s: k })}" ${filter === k ? raw('aria-current="true"') : ''}>${l} <b>${n(k)}</b></a>`)}</nav>
+${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Role</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.slice((page - 1) * PAGE, page * PAGE).map((a) => html`<tr>
 <td class="c-status">${badge(a.status)}</td>
 <td style="min-width:0">${title(a)}${YOUR_TURN.includes(a.status) ? html`<div class="app-reason">${what(a)}</div>` : ''}</td>
 <td class="c-portal">${portalOf(a)}</td>
 <td class="c-when">${ago(a.updatedAt)}</td>
 <td class="c-actions"><div class="row">${actions(a)}</div></td>
-</tr>`)}</tbody></table>` : html`<p class="empty">${apps.length ? 'None with this status.' : 'No applications yet.'}</p>`}
+</tr>`)}</tbody></table>
+${pages > 1 ? html`<nav class="pager" aria-label="Pages">${page > 1 ? html`<a class="btn btn-sm" href="${link({ s: filter, p: page - 1 })}">‹ Previous</a>` : ''}<span class="muted">Page ${page} of ${pages}</span>${page < pages ? html`<a class="btn btn-sm" href="${link({ s: filter, p: page + 1 })}">Next ›</a>` : ''}</nav>` : ''}` : html`<p class="empty">${apps.length ? 'None with this status.' : 'No applications yet.'}</p>`}` : ''}
 </section>`);
   root = createRoot(document.getElementById('charts')!);
   root.render(<Charts s={computeStats(apps)} />);

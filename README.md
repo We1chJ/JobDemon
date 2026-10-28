@@ -29,9 +29,9 @@ retyping the same profile, work history and screening answers into every company
 
 - **Hours back.** One Setup page holds your profile, resume, transcript and screening answers;
   every application reuses them.
-- **You stay in control.** A small widget on the page: *Fill this page*, *Continue* (page by page
-  up to Submit), *✓ Mark submitted*, and the cover letter to copy. Point at any field for a button
-  that fills just that one. It never submits.
+- **You stay in control.** A small bar tucked at the side of the page: *Fill page* fills it and goes
+  on page by page, stopping at Submit, which you click yourself (JobDemon notices and marks it
+  applied). Point at any field for a button that fills just that one. It never submits.
 - **You set the rules.** Plain-English guidelines ("always opt in to future openings", "never
   guess demographic questions") steer every answer, with no code to change.
 - **Private by default.** No server: your profile, files, keys and history stay in your browser.

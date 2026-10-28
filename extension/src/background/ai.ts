@@ -204,7 +204,7 @@ class JevBrain implements Brain {
 // Offline stand-in (tests only): mirrors what Jev is expected to conclude on the mock forms.
 const KEY_RULES: [RegExp, string][] = [
   [/high school/i, 'high_school_grad_year'], [/^(school|university|college)\b/i, 'school'], [/full name/i, 'full_name'],
-  [/end date month|graduation month/i, 'graduation_month'], [/start date month/i, 'school_start_month'], [/start date year/i, 'school_start_year'],
+  [/end date \(?month|graduation month/i, 'graduation_month'], [/start date \(?month/i, 'school_start_month'], [/start date \(?year/i, 'school_start_year'],
   [/\bgpa\b/i, 'gpa'], [/\bact\b/i, 'act_score'], [/\bsat\b/i, 'sat_score'],
   [/street address/i, 'address_street'], [/postal code|zip/i, 'address_zip'], [/mailing address/i, 'mailing_address'],
   [/first name/i, 'first_name'], [/last name/i, 'last_name'], [/e-?mail/i, 'email'],
@@ -275,7 +275,7 @@ class FakeBrain implements Brain {
       return one(m && this.fact(ctx, `work_history_${m[1]}_end`)?.value === 'present' ? 0 : -1);
     }
     if (/hear about/i.test(prompt)) {
-      for (const re of [/linkedin/i, /instagram/i, /job board|social/i, /^other\b/i]) { const i = idx(re); if (i >= 0) return one(i); }
+      for (const re of [...(ctx.portal === 'Workday' ? [/^other\b/i] : []), /linkedin/i, /instagram/i, /job board|social/i, /^other\b/i]) { const i = idx(re); if (i >= 0) return one(i); }
       return one(-1);
     }
     if (q.multiple && /languages?|skills|proficien/i.test(prompt)) {

@@ -1,10 +1,10 @@
-// The JobDemon bar on a job application: Continue · Fill page · ⋯ (cover letter, Dashboard, Setup, Hide).
+// The JobDemon bar on a job application: Fill page · ⋯ (cover letter, Dashboard, Setup, Hide).
 // A line under it says what it's doing and which fields are left for you. Starts top right; drag the logo or
 // the bar to move it (kept for this tab and site). Plus a small button beside each field: fill just that one.
 import LOGO from '../../../assets/logo.svg';
 import { ask } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
-import { continueRun, fillOne, fillThisPage, portalName, requestStop, type Say } from './engine.js';
+import { continueRun, fillOne, portalName, requestStop, type Say } from './engine.js';
 import { readJob } from './read.js';
 
 const ICON = `data:image/svg+xml,${encodeURIComponent(LOGO)}`;
@@ -20,6 +20,9 @@ const CSS = `
 .logo{width:30px;height:30px;border:0;background:none;padding:2px;border-radius:8px;cursor:inherit;display:grid;place-items:center}
 .logo img{width:20px;height:23px;display:block;pointer-events:none}
 .mini .logo{cursor:pointer}.mini .logo:hover{background:var(--soft)}
+.mini .card{border-radius:12px 0 0 12px;border-right:0;opacity:.8;transition:opacity .15s}.mini .card:hover{opacity:1}
+.mini.left .card{border-radius:0 12px 12px 0;border-right:1px solid var(--line);border-left:0}
+.mini .bar{padding:6px 4px 6px 6px;cursor:grab}.mini.left .bar{padding:6px 6px 6px 4px}
 button.b{font:inherit;font-weight:600;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;white-space:nowrap}
 button.b:hover{background:var(--soft)}
 button.b.pri{background:var(--pri);border-color:var(--pri);color:var(--on-pri)}
@@ -44,7 +47,8 @@ details.n ul{margin:4px 0 0;padding-left:18px;color:var(--muted);max-height:30vh
 .menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
 [hidden]{display:none!important}
 `;
-const POS_KEY = 'jobdemon-panel-pos', MINI_KEY = 'jobdemon-panel-mini';
+const POS_KEY = 'jobdemon-panel-pos', MINI_KEY = 'jobdemon-panel-docked', DOCK_KEY = 'jobdemon-panel-dock';
+interface Dock { side: 'left' | 'right'; y: number }
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const remember = (k: string, v: unknown) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const recall = <T>(k: string): T | null => { try { return JSON.parse(sessionStorage.getItem(k) || 'null'); } catch { return null; } };
@@ -69,10 +73,9 @@ export function showPanel(opts: { resume?: boolean } = {}) {
   const bar = el('div', 'bar');
   const logo = el('button', 'logo'); logo.title = 'JobDemon'; logo.setAttribute('aria-label', 'JobDemon');
   const img = el('img'); img.src = ICON; img.alt = ''; logo.append(img);
-  const go = el('button', 'b pri', 'Continue'); go.title = 'Fill every page up to Submit';
-  const fill = el('button', 'b', 'Fill page'); fill.title = 'Fill the empty fields on this page';
+  const go = el('button', 'b pri', 'Fill page'); go.title = 'Fill this page and the next ones, up to Submit';
   const more = el('button', 'b more', '⋯'); more.title = 'More'; more.setAttribute('aria-label', 'More'); more.setAttribute('aria-haspopup', 'menu');
-  bar.append(logo, go, fill, more);
+  bar.append(logo, go, more);
   const menu = el('div', 'menu'); menu.setAttribute('role', 'menu'); menu.hidden = true;
   const item = (label: string, fn: () => void) => { const b = el('button', undefined, label); b.setAttribute('role', 'menuitem'); b.onclick = () => { menu.hidden = true; fn(); }; return b; };
   // Under the bar: status, fields left for you, the cover letter. Hidden when there's nothing to say.
@@ -90,17 +93,11 @@ export function showPanel(opts: { resume?: boolean } = {}) {
 
   const isMini = () => w.classList.contains('mini');
   const showSub = () => { t.hidden = !msg.textContent; sub.hidden = isMini() || (!msg.textContent && needs.hidden && letter.hidden); };
-  const mini = (on: boolean) => {
-    w.classList.toggle('mini', on);
-    [go, fill, more].forEach((b) => (b.hidden = on));
-    menu.hidden = true;
-    logo.title = on ? 'Show JobDemon' : 'JobDemon';
-    showSub();
-    remember(MINI_KEY, on);
-  };
-  unhide = () => mini(false);
 
-  // Position: top right to start; dragged positions are kept for this tab and site.
+  // Open: wherever you last left it (top right to start). Docked: just the logo, tucked against the left or right
+  // edge of the screen; click it to open, slide it along the edge, or drag it off the edge to open it there.
+  // Dragging the open bar to an edge docks it there, as if pulled by a magnet. All kept for this tab and site.
+  const SNAP = 48; // how close to an edge counts as "at the edge"
   const place = (x: number, y: number) => {
     const wd = host!.offsetWidth || 280, ht = host!.offsetHeight || 44;
     x = Math.min(Math.max(0, x), window.innerWidth - Math.min(wd, window.innerWidth));
@@ -108,20 +105,57 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     Object.assign(host!.style, { left: `${x}px`, top: `${y}px`, right: 'auto' });
     return { x, y };
   };
-  const saved = recall<{ x: number; y: number }>(POS_KEY);
-  if (saved) place(saved.x, saved.y);
+  const dockAt = (d: Dock) => {
+    const y = Math.min(Math.max(8, d.y), window.innerHeight - 52);
+    Object.assign(host!.style, d.side === 'left' ? { left: '0', right: 'auto' } : { left: 'auto', right: '0' }, { top: `${y}px` });
+    w.classList.toggle('left', d.side === 'left');
+    return { side: d.side, y };
+  };
+  /** Dock or open. Only your own actions are remembered (an automatic open, e.g. while a fill runs on, isn't). */
+  const mini = (on: boolean, remembered = true) => {
+    w.classList.toggle('mini', on);
+    [go, more].forEach((b) => (b.hidden = on));
+    menu.hidden = true;
+    logo.title = on ? 'Open JobDemon' : 'JobDemon';
+    if (on) dockAt(recall<Dock>(DOCK_KEY) ?? { side: 'right', y: Math.round(window.innerHeight * 0.4) });
+    else { w.classList.remove('left'); const p = recall<{ x: number; y: number }>(POS_KEY); if (p) place(p.x, p.y); else Object.assign(host!.style, { left: 'auto', right: '16px', top: '16px' }); }
+    showSub();
+    if (remembered) remember(MINI_KEY, on);
+  };
+  unhide = () => mini(false, false);
+
   let dragged = false;
   bar.addEventListener('pointerdown', (e) => {
-    if ((e.target as Element).closest('button:not(.logo)')) return;
+    if (!isMini() && (e.target as Element).closest('button:not(.logo)')) return;
     const r = host!.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top, sx = e.clientX, sy = e.clientY;
+    const docked = isMini(), side: Dock['side'] = w.classList.contains('left') ? 'left' : 'right';
     bar.setPointerCapture(e.pointerId);
     dragged = false;
     let last = { x: r.left, y: r.top };
-    const move = (ev: PointerEvent) => { if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 4) { dragged = true; last = place(ev.clientX - dx, ev.clientY - dy); } };
-    const up = () => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); if (dragged) remember(POS_KEY, last); };
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return;
+      dragged = true;
+      if (docked) dockAt({ side, y: ev.clientY - dy }); // slide along the edge
+      else last = place(ev.clientX - dx, ev.clientY - dy);
+    };
+    const up = (ev: PointerEvent) => {
+      bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up);
+      if (!dragged) return;
+      if (docked) {
+        // Pulled well away from the edge: open it where it was dropped. Otherwise it stays docked at the new height.
+        const away = side === 'left' ? ev.clientX > SNAP * 2 : ev.clientX < window.innerWidth - SNAP * 2;
+        if (away) { remember(POS_KEY, { x: ev.clientX - 20, y: ev.clientY - 20 }); mini(false); }
+        else remember(DOCK_KEY, { side, y: ev.clientY - dy });
+        return;
+      }
+      const box = host!.getBoundingClientRect();
+      const edge = box.left < SNAP ? 'left' : box.right > window.innerWidth - SNAP ? 'right' : null;
+      if (edge) { remember(DOCK_KEY, { side: edge, y: box.top }); mini(true); } // pulled to the side: tuck it away
+      else remember(POS_KEY, last);
+    };
     bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);
   });
-  logo.onclick = () => { if (!dragged && isMini()) mini(false); };
+  bar.addEventListener('click', () => { if (!dragged && isMini()) mini(false); });
 
   say = (status, list) => {
     msg.textContent = status;
@@ -132,13 +166,12 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     }
     showSub();
   };
-  // While it works, the main button is Stop (for Continue and Fill page alike).
+  // While it works, the button is Stop.
   const working = (on: boolean) => {
     busy = on;
     w.classList.toggle('busy', on);
-    fill.disabled = on;
-    go.textContent = on ? 'Stop' : 'Continue';
-    go.title = on ? 'Stop after the field it is on' : 'Fill every page up to Submit';
+    go.textContent = on ? 'Stop' : 'Fill page';
+    go.title = on ? 'Stop after the field it is on' : 'Fill this page and the next ones, up to Submit';
   };
   const guard = (fn: () => Promise<unknown>) => async () => {
     if (busy) return;
@@ -146,7 +179,6 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     needs.hidden = true;
     try { await fn(); } catch (e) { say(`Error: ${(e as Error).message}`); } finally { working(false); }
   };
-  fill.onclick = guard(() => fillThisPage(say));
   const runIt = guard(() => continueRun(say, opts.resume));
   go.onclick = () => { if (!busy) return void runIt(); say('Stopping after this field…'); void requestStop(); };
   more.onclick = () => { menu.hidden = !menu.hidden; };
@@ -184,20 +216,22 @@ export function showPanel(opts: { resume?: boolean } = {}) {
   };
   close.onclick = () => { letter.hidden = true; showSub(); };
 
-  if (recall<boolean>(MINI_KEY) && !opts.resume) mini(true);
+  // Docked to the side to start, so it covers nothing; open while a fill is running on, or if you opened it here.
+  mini(!opts.resume && recall<boolean>(MINI_KEY) !== false, false);
   hover();
   if (opts.resume) void runIt();
 }
 
 /** The toolbar icon: show the bar, opened up if it was hidden. */
 export function revealPanel() {
-  if (!host) return showPanel();
+  if (!host) showPanel();
   unhide();
 }
 
 /** Your Submit went through: say so. */
 export function appliedNotice() {
   if (!host) showPanel();
+  unhide();
   say('Submitted. Marked as applied.', []);
 }
 

@@ -8,6 +8,8 @@ export const unanswered = (q: Question, why: string): Answer => (q.required ? { 
 
 // The AI chooses among at most this many options at once (Jev's limit is 255).
 const MAX_CHOICES = 200;
+// "How did you hear about us?" never stays blank: when no option fits, the first one is chosen.
+const HEARD = /how (did|do) you (hear|learn|find out) about|where did you (hear|learn|find out) about/i;
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []);
 /** The options of a very long list closest to a known answer, plus any "Other" / "not listed" option. */
 function shortlist(options: string[], want: string, keep = 40) {
@@ -30,11 +32,12 @@ export async function answerQuestion(q: Question, ctx: Context, brain: Brain): P
   if (q.candidates) {
     if (!q.candidates.length) return unanswered(q, 'the form offered no options');
     const r = await brain.pick(q as Question & { candidates: string[] }, ctx);
-    if (!r.indexes.length) return unanswered(q, 'no option fits your data');
+    if (!r.indexes.length) return HEARD.test(q.prompt) ? { kind: 'pick', indexes: [0], because: `no option fits, so the first: "${q.candidates[0]}"` } : unanswered(q, 'no option fits your data');
     return { kind: 'pick', indexes: r.indexes, because: `chose ${r.indexes.map((i) => `"${q.candidates![i]}"`).join(', ')}` };
   }
   const s = await brain.source(q, ctx);
-  if (s.blank) return { kind: 'skip', because: 'left blank on purpose' };
+  // A required question can't stay blank: it's left for you instead.
+  if (s.blank) return q.required ? unanswered(q, 'the AI would leave it blank, but the form requires an answer') : { kind: 'skip', because: 'left blank on purpose' };
   if (s.fact) return { kind: 'text', value: s.fact.value, because: s.fact.key };
   if (s.write) {
     const w = await brain.write(s.write, q.prompt, ctx);

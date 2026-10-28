@@ -6,6 +6,9 @@ import { portalName } from '../shared/portal.js';
 /** The interaction patterns, plus native selects and anything unrecognised. */
 export type WidgetKind = 'text' | 'textarea' | 'native' | 'pick' | 'checkbox' | 'checkgroup' | 'radio' | 'buttons' | 'date' | 'file' | 'unknown';
 
+/** A dropdown's prompt rather than a choice: "Select", "Please select a State/Province", "— Make a Selection —". */
+export const PLACEHOLDER = /^[-–—\s]*((please )?(select|choose|pick)\b|make a selection)|^search$|^[-–—]+$|^[-–—]{2,}|^\d+ items? selected$/i;
+
 export interface Field {
   key: string; // stable identity on this page: container name + entry + label
   kind: WidgetKind;
@@ -38,6 +41,8 @@ const clean = (s?: string | null) => (s || '').replace(/\s+/g, ' ').trim();
 // Required marks: *, and the other stars sites use (✱ ✳ ＊ ∗).
 const STAR = /[*✱✳＊⁎∗]/g;
 const noStar = (s?: string | null) => clean(s).replace(STAR, '').trim();
+// Text that reads as a form's error message (as opposed to a status such as "0 items selected").
+const ERRORISH = /error|required|invalid|must|please|not valid|too (long|short)|enter a|select a/i;
 export const shown = (el: Element | null | undefined): boolean => {
   if (!el || !(el as HTMLElement).getBoundingClientRect) return false;
   const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
@@ -133,6 +138,8 @@ const inSearchForm = (el: Element) => {
   const fields = all<HTMLInputElement>('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea', f);
   return fields.length <= 5 && fields.some((i) => i.type === 'search' || /^(q|query|search|keywords?)$/i.test(i.name || '') || /^search\b/i.test(i.placeholder || ''));
 };
+// The words on an upload widget's own buttons ("Attach", "Dropbox", "Enter manually"…): never the question itself.
+const GENERIC_FILE = /^(attach|attach file|upload|upload file|choose file|select file|browse|drop files? here|or|dropbox|google drive|enter manually|paste|type it in)$/i;
 const SEARCH_LABEL = /\bfilter (jobs|roles|positions|openings|results)\b|\bsearch (jobs|roles|positions|openings)\b|search job title/i;
 
 function readOnce(): Step {
@@ -201,7 +208,8 @@ function readOnce(): Step {
     while (up(box) && !mine.every((e) => within(box, e))) box = up(box)!;
     const known = closest<HTMLElement>(g.els[0], '[data-automation-id^="formField-"], [data-field-path]');
     if (known && mine.every((e) => within(known, e)) && !others(g, known)) box = known;
-    else for (let k = 0; k < 6 && up(box) && up(box) !== document.body; k++) {
+    // Custom dropdowns (react-select) bury their input ten or so boxes below the label.
+    else for (let k = 0; k < 12 && up(box) && up(box) !== document.body; k++) {
       const own = optionLabelSet(g);
       const labelled = box !== g.els[0] && all(LABELISH, box).some((l) => !own.has(l) && noStar(inner(l)));
       if (labelled || (box !== g.els[0] && g.kind === 'checkbox' && ownLabels(g.els[0]).some((l) => within(box, l)))) break;
@@ -225,9 +233,13 @@ function readOnce(): Step {
     const heads = all(HEADS, box).filter((h) => textOf(h));
     const numbered = heads.filter((h) => /\s\d+$/.test(textOf(h)));
     const title = heads.find((h) => !/\s\d+$/.test(textOf(h)));
-    return { add: b, heading: textOf(title) || (numbered[0] ? textOf(numbered[0]).replace(/\s\d+$/, '') : `Section ${i + 1}`), entries: numbered.length, box, numbered };
+    // A title may carry its entry count and a required mark (iCIMS: "Phones (1)* required."): the count is the
+    // number of entries, and not part of the name (it changes as entries are added).
+    const count = textOf(title).match(/\((\d+)\)/);
+    const name = noStar(textOf(title).replace(/\(\d+\)/, '').replace(/\brequired\.?$/i, ''));
+    return { add: b, heading: name || (numbered[0] ? textOf(numbered[0]).replace(/\s\d+$/, '') : `Section ${i + 1}`), entries: Math.max(numbered.length, count ? +count[1] : 0), box, numbered };
   });
-  const labelsOf = (el: Element) => all('label, legend', el).map((l) => noStar(inner(l))).filter(Boolean).join('|');
+  const labelsOf = (el: Element) => all('label, legend', el).map((l) => noStar(inner(l))).filter((t) => t && !GENERIC_FILE.test(t)).join('|');
   // Rows of a repeating section with no numbered headings (e.g. one row per school): the same set of questions
   // repeated in sibling boxes. The row's place among the visible ones is its number.
   const rowOf = (el: Element) => {
@@ -251,7 +263,6 @@ function readOnce(): Step {
   };
 
   // ── Each question: label, kind, value, error ──
-  const PLACEHOLDER = /^(select|choose|pick)\b|^please (select|choose)\b|^search$|^--+|^\d+ items? selected$/i;
   const kindOf = (el: HTMLElement): WidgetKind => {
     if (input(el).type === 'file') return 'file';
     if (el.tagName === 'SELECT') return 'native';
@@ -280,7 +291,6 @@ function readOnce(): Step {
     const search = /searchBox/i.test(aid(el)) || /^search\b/i.test(input(el).placeholder || '') || !!closest(el, '[data-automation-id*="multiselectInputContainer" i]');
     return el.tagName === 'INPUT' && !search && el.getAttribute('aria-expanded') !== 'true' ? clean(input(el).value) : '';
   };
-  const GENERIC_FILE = /^(attach|upload|choose file|browse|drop files? here|or)$/i;
 
   const fields: Field[] = groups.map((g) => {
     const box = g.box!, el = g.kind === 'buttons' ? g.anchor : g.els[0];
@@ -319,7 +329,7 @@ function readOnce(): Step {
       const s = el as HTMLSelectElement;
       options = [...s.options].map((o) => clean(o.text)).filter(Boolean);
       value = s.value && s.selectedIndex >= 0 ? clean(s.options[s.selectedIndex].text) : '';
-      if (/^(select|choose)\b|^-+$/i.test(value)) value = '';
+      if (PLACEHOLDER.test(value)) value = '';
     } else if (kind === 'pick') value = pickValue(el, box);
     else if (kind === 'file') value = input(el).files?.[0]?.name || (textOf(box).match(/[^\s/\\]+\.(pdf|docx?|txt|rtf)\b/i) || [])[0] || '';
     else value = clean(el.isContentEditable ? inner(el) : input(el).value);
@@ -332,18 +342,21 @@ function readOnce(): Step {
     // Everything else the form says about the question, so the AI never sees a bare heading: the rest of its box
     // (instructions, word limits, the real question under a short heading), help text linked to its controls, and
     // the box's placeholder. Minus its label, options, current value and error message.
-    const error = linked[0] || inside[0] || '';
-    const linkedHelp = [g.anchor, ...g.els].flatMap((c) => byIds(c.getAttribute('aria-describedby'), c)).filter((n) => !within(box, n)).map(textOf).filter((t) => t && t !== error);
+    // Several texts can be linked to a control (screen-reader statuses like "0 items selected"): prefer the one that reads as an error.
+    const error = linked.find((t) => ERRORISH.test(t)) || inside.find((t) => ERRORISH.test(t)) || linked[0] || inside[0] || '';
+    const linkedHelp = [g.anchor, ...g.els].flatMap((c) => byIds(c.getAttribute('aria-describedby'), c)).filter((n) => !within(box, n)).map(textOf).filter((t) => t && !linked.includes(t));
     const placeholder = clean(input(el).placeholder) || clean(el.getAttribute('aria-placeholder'));
     let rest = clean(ownText(box));
     for (const t of [label, ...(options ?? []), value, error].filter((x) => x && x.length > 1).sort((x, y) => y.length - x.length)) rest = rest.split(t).join(' ');
     rest = clean(rest.replace(STAR, ''));
-    const description = [...new Set([rest, ...linkedHelp, placeholder && placeholder !== label && !/^(select|choose|search)\b/i.test(placeholder) ? `(box says: ${placeholder})` : ''])]
+    // A question inside a repeating section with no numbered entries ("Type" under Phones): say which section.
+    const sec = entry ? undefined : sections.find((s) => within(s.box, box));
+    const description = [...new Set([sec ? `Part of the "${sec.heading}" section.` : '', rest, ...linkedHelp, placeholder && placeholder !== label && !/^(select|choose|search)\b/i.test(placeholder) ? `(box says: ${placeholder})` : ''])]
       .filter((t) => t && t.length > 1 && t !== label).join('\n').slice(0, 2000);
     return {
       description: description || undefined,
       key: `${aid(box) || input(el).name || el.id || ''}|${entry}|${label}`, kind, label, entry: entry || undefined, required, value, options, dateParts,
-      editable: kind === 'pick' && el.tagName === 'INPUT', error: linked[0] || inside[0] || undefined, box, els: g.els, face: faces.get(el),
+      editable: kind === 'pick' && el.tagName === 'INPUT', error: error || undefined, box, els: g.els, face: faces.get(el),
     };
   });
 
@@ -399,7 +412,7 @@ export function readJob() {
   const fromTitle = (byAddress ?? byHeading)?.replace(/\s+(careers|jobs)$/i, '');
   if (!company && fromTitle && parts.length >= 2) { company = fromTitle; role = role || h1 || parts.filter((p) => p !== byAddress && p !== byHeading).join(' - '); }
   role = role || h1 || og('og:title') || title;
-  company = company || og('og:site_name') || location.hostname.replace(/^(www|boards|job-boards|jobs|careers)\./, '').split('.')[0];
+  company = (company || og('og:site_name') || location.hostname.replace(/^(www|boards|job-boards|jobs|careers)\./, '').split('.')[0]).replace(/\s+(careers|jobs)$/i, '');
   const copy = document.body.cloneNode(true) as HTMLElement;
   copy.querySelectorAll('form, script, style, nav, footer, #jobdemon-host').forEach((n) => n.remove());
   const jd = (copy.innerText || copy.textContent || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 12000);

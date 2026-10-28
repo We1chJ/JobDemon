@@ -1,8 +1,8 @@
 // The background worker: the only part that calls the AI. Pages and frames send it questions; it answers each
-// with your whole Setup as context. It also keeps "Continue" going across page loads and your history.
+// with your whole Setup as context. It also keeps a fill going across page loads and your history.
 import { answerQuestion } from '../shared/answer.js';
 import { buildContext } from '../shared/context.js';
-import type { FillReport, Reply, Run, ToBackground, ToFrame } from '../shared/msg.js';
+import type { FillReport, Look, Reply, Run, ToBackground, ToFrame } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
 import { profileVersion, store, toBase64, updateHistory } from '../shared/store.js';
 import type { Context, JobCtx } from '../shared/types.js';
@@ -64,11 +64,28 @@ async function frames(tabId: number, m: ToFrame): Promise<FillReport> {
   const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
   const out: FillReport = { fields: 0, filled: 0, needs: [] };
   for (const f of all.filter((x) => x.frameId !== 0 && /^https?:/.test(x.url))) {
-    const r = (await chrome.tabs.sendMessage(tabId, m, { frameId: f.frameId }).catch(() => null)) as Reply<FillReport | null> | null;
+    // A frame that loads a new page while filling never answers (some forms reload after reading your resume).
+    const r = (await chrome.tabs.sendMessage(tabId, m, { frameId: f.frameId }).catch((e: Error) => { if (!/receiving end does not exist/i.test(e.message)) out.cut = true; return null; })) as Reply<FillReport | null> | null;
     if (r?.ok && r.v) { out.fields += r.v.fields; out.filled += r.v.filled; out.needs.push(...r.v.needs); }
   }
   return out;
 }
+
+/** How each frame inside the tab looks (the page itself not included). */
+async function looks(tabId: number, job?: boolean): Promise<Look[]> {
+  const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
+  const out: Look[] = [];
+  for (const f of all.filter((x) => x.frameId !== 0 && /^https?:/.test(x.url))) {
+    const r = (await chrome.tabs.sendMessage(tabId, { t: 'look', job } satisfies ToFrame, { frameId: f.frameId }).catch(() => null)) as Reply<Look> | null;
+    if (r?.ok && r.v) out.push({ ...r.v, frame: f.frameId, buttons: r.v.buttons.map((b) => ({ ...b, frame: f.frameId })) });
+  }
+  return out;
+}
+
+const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
+// A title that doesn't name the job: the careers site's own name, or its sign-in page.
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const vague = (j: JobCtx) => !j.role || squash(j.role) === squash(j.company) || /\b(careers|jobs)$|^(log ?in|sign ?in)\b/i.test(j.role);
 
 async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const tab = sender.tab;
@@ -77,11 +94,20 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
   const id = tab.id;
   switch (m.t) {
     case 'job': {
+      if (m.fix) {
+        // A form embedded in the page names the job better than the page around it (iCIMS): take its title.
+        const had = (await session.get(`job:${id}`))[`job:${id}`] as TabJob | undefined;
+        if (had && vague(had.job) && !vague(m.job)) {
+          // Keep the company unless it was only guessed from the address (the frame's title may start "Start your application").
+          const fromAddress = !had.job.company || host(had.job.url).split('.').includes(had.job.company.toLowerCase());
+          await session.set({ [`job:${id}`]: { ...had, job: { ...had.job, role: m.job.role, company: fromAddress ? m.job.company || had.job.company : had.job.company, jd: m.job.jd.length > had.job.jd.length ? m.job.jd : had.job.jd } } });
+        }
+        return null;
+      }
       // The first page of an application has the job description; later pages keep it unless the site changes.
       // Another job in the same tab replaces it; a later step of the same application (little text, same site) doesn't.
       const got = await session.get([`job:${id}`, `run:${id}`]);
       const had = got[`job:${id}`] as TabJob | undefined, running = !!(got[`run:${id}`] as Run | undefined)?.active;
-      const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
       const laterStep = had && host(had.job.url) === host(m.job.url) && m.job.jd.length < 1000;
       if (!had || (!running && !laterStep && had.job.url !== m.job.url)) {
         await session.set({ [`job:${id}`]: { job: m.job, portal: m.portal } });
@@ -117,6 +143,18 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
     case 'run:get': return ((await session.get(`run:${id}`))[`run:${id}`] as Run | undefined) ?? null;
     case 'run:set': return m.run ? session.set({ [`run:${id}`]: m.run }) : session.remove(`run:${id}`);
     case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: m.op });
+    case 'frames:look': return looks(id, m.job);
+    case 'uploads': {
+      // The upload questions answered in this fill (a form that reloads after reading a file may not show it).
+      if (m.clear) return session.remove(`up:${id}`);
+      const done = ((await session.get(`up:${id}`))[`up:${id}`] as string[] | undefined) ?? [];
+      if (m.add && !done.includes(m.add)) await session.set({ [`up:${id}`]: [...done, m.add] });
+      return done;
+    }
+    case 'frames:click': {
+      const r = (await chrome.tabs.sendMessage(id, { t: 'click', text: m.text } satisfies ToFrame, { frameId: m.frameId }).catch(() => null)) as Reply<boolean> | null;
+      return !!(r?.ok && r.v);
+    }
     case 'log': return appendLog(id, m.e);
     case 'report': return report(tab);
     case 'submit:pending': {
@@ -149,7 +187,7 @@ chrome.runtime.onMessage.addListener((m: ToBackground, sender, reply: (r: Reply<
 
 // The toolbar icon shows the widget on any page.
 chrome.action.onClicked.addListener((tab) => { if (tab.id) void chrome.tabs.sendMessage(tab.id, { t: 'show' } satisfies ToFrame, { frameId: 0 }).catch(() => {}); });
-// An Apply link that opens the application in a new tab: "Continue" carries on there.
+// An Apply link that opens the application in a new tab: the fill carries on there.
 chrome.tabs.onCreated.addListener(async (tab) => {
   if (!tab.id || !tab.openerTabId) return;
   const from = tab.openerTabId;
@@ -159,5 +197,5 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   await session.set({ [`run:${tab.id}`]: { ...run, lastClickAt: Date.now() }, ...(got[`job:${from}`] ? { [`job:${tab.id}`]: got[`job:${from}`] } : {}) });
   await session.remove(`run:${from}`);
 });
-chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`, `submit:${id}`, `log:${id}`]));
+chrome.tabs.onRemoved.addListener((id) => void session.remove([`job:${id}`, `run:${id}`, `submit:${id}`, `log:${id}`, `up:${id}`]));
 chrome.runtime.onInstalled.addListener((d) => { if (d.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('pages/setup.html') }); });

@@ -4,9 +4,9 @@ import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
-export const stats = { posts: 0 }; // every submission attempt that reached the server, valid or not
+export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -93,7 +93,7 @@ ${wdSearch('phoneCode', 'Country Phone Code', true)}${wdText('phoneNumber', 'Pho
 ${wdText('postalCode', 'Postal Code')}${wdText('extension', 'Phone Extension')}
 ${wdCheck('preferredCheckbox', 'I have a preferred name')}
 <div style="display:none">${wdCheck('tnc', 'Terms and Conditions')}</div>
-${job === '14' ? wdText('employeeId', 'Employee ID', true) : ''}</section>
+${job === '14' ? wdText('employeeId', 'Employee ID', true) + '<div><input type="checkbox" id="sms-0"><label for="sms-0">SMS Opt-in</label></div>' : ''}</section>
 <section class="wd-step" data-name="My Experience" hidden><h2>My Experience</h2>
 <div data-automation-id="workExperienceSection"><h3>Work Experience</h3><div class="entries" data-kind="work"></div><button type="button" data-automation-id="Add" class="add">Add</button></div>
 <div data-automation-id="educationSection"><h3>Education</h3><div class="entries" data-kind="edu"></div><button type="button" data-automation-id="Add" class="add">Add</button></div>
@@ -172,6 +172,9 @@ const empty = (f) => {
   return [...f.querySelectorAll('input, textarea')].some((i) => !i.value.trim());
 };
 $('#wnext').onclick = () => {
+  // Like Workday's SMS opt-in: a control whose id is new every time the step redraws.
+  const sms = document.querySelector('[id^=sms-]');
+  if (sms) { const id = 'sms-' + Math.random().toString(36).slice(2); sms.nextElementSibling.htmlFor = id; sms.id = id; }
   const step = $$('.wd-step')[at];
   const bad = [...step.querySelectorAll('[data-automation-id^=formField-]')].filter((f) => f.offsetParent !== null && empty(f));
   $$('[data-automation-id=errorMessage]').forEach((m) => (m.hidden = true));
@@ -525,6 +528,87 @@ make('x-select', (h) => '<label for="s">' + h.getAttribute('label') + '</label><
 make('x-check', () => '<input type="checkbox" id="c" required><label for="c"><slot name="label"></slot> *</label>', (r) => r.querySelector('input').checked ? 'checked' : '');
 make('x-button', () => '<button type="button"><slot></slot></button>', () => '');
 </script></body></html>`));
+  // 21: Greenhouse-style uploads: each box has its own Attach / Dropbox / Google Drive / Enter manually buttons
+  // (with labels), and the real question ("Resume/CV", "Cover Letter") sits above them.
+  app.get('/jobs/21', (c) => {
+    const upload = (id: string, label: string, req = false) => `<div class="field"><div class="label upload-label" id="${id}-lbl">${label}${req ? '<span>*</span>' : ''}</div>
+<div class="file-upload"><div><button type="button">Attach</button><label for="${id}" class="visually-hidden">Attach</label><input type="file" id="${id}" name="${id}" style="display:none"></div>
+<div><button type="button">Dropbox</button></div><div><button type="button">Google Drive</button></div>
+<div><div><button type="button">Enter manually</button><label for="${id}-text">Enter manually</label></div></div><p>Accepted file types: pdf, doc, docx, txt, rtf</p></div></div>`;
+    return c.html(`<!doctype html><html><head><title>Job Application for ${ROLES['21']} at Mockco</title></head><body><h1>${ROLES['21']}</h1>${JD}
+<form id="f21"><h2>Apply for this job</h2><div><label for="fn21">First Name *</label><input id="fn21" name="fn21" required></div>
+<div><label for="em21">Email *</label><input id="em21" name="em21" type="email" required></div>
+${upload('resume21', 'Resume/CV', true)}${upload('cover21', 'Cover Letter')}
+<div><label for="oh21">Are you currently a legal resident of Ohio? *</label><select id="oh21" name="oh21" required><option value="">Select...</option><option>Yes</option><option>No</option></select></div>
+<div class="field-group"><div class="input-label"><label for="Veteran Status"><span>Veteran Status*:</span></label></div><div><div class="custom-select"><div><div id="rs21" class="dropdown-autocomplete">
+<div class="control"><div class="value"><div class="placeholder">Select</div><div class="in"><div style="display:inline-block"><input id="react-select-21-input" type="text" aria-autocomplete="list" autocomplete="off"></div></div></div><div class="indicators"><span></span><div aria-hidden="true">v</div></div></div>
+</div></div></div></div></div>
+<div class="field-group"><div class="input-label"><label for="educations[0].start_date.month"><span>Start Date (Month):</span></label></div><div><input id="sm21" name="educations[0].start_date.month" type="number" placeholder="MM" min="1" max="12"></div></div>
+<button type="button">Submit application</button></form>
+<script>
+// Older react-select (Epic Games' careers site): the label isn't tied to the input, options have no role.
+const rs = document.getElementById('rs21'), rsIn = document.getElementById('react-select-21-input'), shown = rs.querySelector('.placeholder');
+const close = () => rs.querySelector('.menu')?.remove();
+const open = () => { if (rs.querySelector('.menu')) return; const m = document.createElement('div'); m.className = 'menu';
+  m.innerHTML = ['Yes, I am a protected veteran', 'No, I am not a protected veteran', "I don't wish to answer"].map((o, i) => '<div id="react-select-21-option-' + i + '" tabindex="-1">' + o + '</div>').join('');
+  m.addEventListener('click', (e) => { const o = e.target.closest('[id*="-option-"]'); if (!o) return; shown.textContent = o.textContent; shown.className = 'single-value'; close(); });
+  rs.appendChild(m); };
+rs.querySelector('.control').addEventListener('mousedown', open);
+rsIn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') open(); if (e.key === 'Escape') close(); });
+</script></body></html>`);
+  });
+  // 22: iCIMS-style repeating sections: the title carries the entry count and a required mark ("Phones (1)* required.").
+  app.get('/jobs/22', (c) => {
+    const sec = (id: string, title: string, row: string) => `<div class="sec" id="${id}"><h3><span class="t">${title} (1)</span><span>*</span> required.</h3>
+<div class="rows"><div class="row">${row}</div></div><button type="button" class="add">Add More <span>(${title})</span></button></div>`;
+    return c.html(`<!doctype html><html><head><title>${ROLES['22']} | Mockco Careers</title></head><body><h1>${ROLES['22']}</h1>${JD}
+<form id="f22"><div><label for="fn22">First Name *</label><input id="fn22" name="fn22" required></div>
+${sec('phones22', 'Phones', '<div><label>Number *</label><input class="num" required></div>')}
+${sec('work22', 'Professional Experience', '<div><label>Employer *</label><input class="emp" required></div><div><label>Title *</label><input class="ttl" required></div>')}
+<button type="button">Submit</button></form>
+<script>document.querySelectorAll('.sec').forEach((s) => s.querySelector('.add').addEventListener('click', () => {
+  const rows = s.querySelector('.rows'); const r = rows.firstElementChild.cloneNode(true); r.querySelectorAll('input').forEach((i) => i.value = ''); rows.appendChild(r);
+  s.querySelector('.t').textContent = s.querySelector('.t').textContent.replace(/\\(\\d+\\)/, '(' + rows.children.length + ')');
+}));</script></body></html>`);
+  });
+  // 23: iCIMS-style: every step runs inside a frame on the company's careers page (whose title doesn't name the job).
+  // Posting → email → profile that also creates your account (reloads after reading your resume) → questions → Submit.
+  app.get('/jobs/23', (c) => c.html(`<!doctype html><html><head><title>Mockco Careers</title></head><body><h1>Mockco Careers</h1>
+<nav><a href="/jobs/">All jobs</a></nav><iframe id="icims_content_iframe" src="/icims/23/job?in_iframe=1" width="1000" height="1600"></iframe></body></html>`));
+  const icims = (body: string, title = `${ROLES['23']} | Mockco Careers`) => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
+  app.get('/icims/23/job', (c) => c.html(icims(`<h1>${ROLES['23']}</h1>${JD}<a href="/icims/23/login?in_iframe=1">Apply for this job online</a>`)));
+  app.get('/icims/23/login', (c) => c.html(icims(`<h1>Let's get started</h1><form onsubmit="return false">
+<div><label for="em23">Email *</label><input id="em23" type="email" required></div>
+<div><input type="checkbox" id="pv23" required><label for="pv23">I have read and agree to the privacy notice *</label></div>
+<p class="err" hidden>Enter your email and agree to the privacy notice.</p>
+<button type="button" onclick="if (em23.value && pv23.checked) location.href = '/icims/23/profile?in_iframe=1'; else document.querySelector('.err').hidden = false">Next</button></form>`, "Login | Let's get started")));
+  app.get('/icims/23/profile', (c) => {
+    const parsed = c.req.query('parsed') === '1';
+    if (parsed) stats.parses++;
+    return c.html(icims(`<h1>${ROLES['23']}</h1><form onsubmit="return false">
+<div class="field"><label for="cv23">Please upload a resume to auto populate the profile fields below *</label>
+${parsed ? '<button type="button" class="replace">Replace Resume</button>' : ''}<input type="file" id="cv23" onchange="setTimeout(() => location.href = '/icims/23/profile?in_iframe=1&parsed=1', 600)"></div>
+<div><label for="mail23">Email *</label><input id="mail23" type="email" value="jane@example.com" required></div>
+<div class="account"><div><label for="login23">Login *</label><div><input id="login23" type="text" required></div></div>
+<div><label for="pw23">Password *</label><div><input id="pw23" type="password" required></div></div>
+<div><label for="pw23b">Password (Re-enter) *</label><div><input id="pw23b" type="password" required></div></div></div>
+<div><label for="fn23">First Name *</label><input id="fn23" required value="${parsed ? 'Jane' : ''}"></div>
+<div><label for="ln23">Last Name *</label><input id="ln23" required></div>
+<div class="sec" id="phones23"><h3><span class="t">Phones (1)</span><span>*</span> required.</h3><div class="rows"><div class="row"><div><label for="ph23">Phone Number *</label><input id="ph23" required></div></div></div><button type="button" class="add">Add More <span>(Phones)</span></button></div>
+<p class="err" hidden>Please complete the required fields.</p>
+<button type="button" onclick="if ([...document.querySelectorAll('[required]')].every((i) => i.type === 'file' || i.value) && pw23.value === pw23b.value) location.href = '/icims/23/questions?in_iframe=1'; else document.querySelector('.err').hidden = false">Create Profile</button></form>
+<script>document.querySelector('.add').addEventListener('click', () => { const rows = document.querySelector('.rows'); rows.appendChild(rows.firstElementChild.cloneNode(true)); });</script>`));
+  });
+  app.get('/icims/23/questions', (c) => c.html(icims(`<h1>Questions</h1><form onsubmit="return false">
+<div><label for="auth23">Are you legally authorized to work in the United States? *</label><select id="auth23" required><option value="0">— Make a Selection —</option><option>Yes</option><option>No</option></select></div>
+<div><label for="src23">How did you hear about us? *</label><select id="src23" required><option value="">— Make a Selection —</option><option>Career Fair</option><option>Employee Referral</option></select></div>
+<div><label for="ctry23">Country *</label><div><select id="ctry23" required tabindex="-1" aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden"></select>
+<a role="combobox" aria-haspopup="listbox" tabindex="0" id="cface23" href="#"><span>— Make a Selection —</span></a><div><ul role="listbox" id="clist23" hidden></ul></div></div></div>
+<button type="button">Submit Application</button></form>
+<script>// iCIMS-style: the select stays empty until the drawn list is opened, and only that list fills it.
+const cf = document.getElementById('cface23'), cl = document.getElementById('clist23'), cs = document.getElementById('ctry23');
+cf.addEventListener('click', (e) => { e.preventDefault(); cl.innerHTML = ['Canada', 'United States', 'Mexico'].map((t) => '<li role="option">' + t + '</li>').join(''); cl.hidden = false; });
+cl.addEventListener('click', (e) => { const o = e.target.closest('[role=option]'); if (!o) return; cs.innerHTML = '<option selected>' + o.textContent + '</option>'; cf.firstElementChild.textContent = o.textContent; cl.hidden = true; });</script>`)));
   // 9: a posting with no way into an application.
   app.get('/jobs/9', (c) => c.html(overview('9', '', '<p>Applications are closed.</p>')));
   // Has a visible CAPTCHA widget: must go to the human queue.

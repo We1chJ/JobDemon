@@ -1,7 +1,7 @@
 // Runs in every page and frame. The bar appears by itself only on job applications (and postings you apply from);
 // the toolbar icon shows it on any page. Frames with an embedded application form fill when the page asks them to.
 import { ask, type Reply, type Run, type ToFrame } from '../shared/msg.js';
-import { fillFrame, portalName, setStopping } from './engine.js';
+import { clickButton, fillFrame, look as lookHere, portalName, setStopping } from './engine.js';
 import { appliedNotice, hover, revealPanel, showPanel } from './panel.js';
 import { readStep } from './read.js';
 import { afterSubmit, watchSubmits } from './submit.js';
@@ -12,6 +12,8 @@ const top = window.top === window;
 chrome.runtime.onMessage.addListener((m: ToFrame, _sender, reply: (r: Reply<unknown>) => void) => {
   if (m.t === 'stop') setStopping(true);
   if (m.t === 'fill') { setStopping(false); fillFrame(() => {}, m.retry).then((v) => reply({ ok: true, v }), (e: Error) => reply({ ok: false, error: e.message })); return true; }
+  if (m.t === 'look') { reply({ ok: true, v: lookHere(m.job) }); return false; }
+  if (m.t === 'click') { reply({ ok: true, v: clickButton(m.text) }); return false; }
   if (m.t === 'hover') hover();
   if (m.t === 'show' && top) revealPanel();
   if (m.t === 'applied' && top) appliedNotice();
@@ -19,7 +21,7 @@ chrome.runtime.onMessage.addListener((m: ToFrame, _sender, reply: (r: Reply<unkn
   return false;
 });
 
-const APPLY = /^(apply( now| for this (job|position|role))?|start (your |my )?application|i'?m interested)$/i;
+const APPLY = /^(apply( now| online| for this (job|position|role)( online)?)?|start (your |my )?application|i'?m interested)$/i;
 /** A job application: a form asking for your name, email or resume; or a job posting you can apply from. */
 function isJobApplication() {
   const step = readStep();
@@ -42,7 +44,7 @@ async function start() {
   watchSubmits();
   void afterSubmit();
   if (top) {
-    // "Continue" was going when this page loaded: carry on.
+    // A fill was going when this page loaded: carry on.
     const run = await ask<Run | null>({ t: 'run:get' }).catch(() => null);
     if (run?.active) { await sleep(1500); return showPanel({ resume: true }); }
   }

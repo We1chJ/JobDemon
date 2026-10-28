@@ -5,7 +5,7 @@
 import { unanswered } from '../shared/answer.js';
 import { ask, type FileReply } from '../shared/msg.js';
 import type { Answer, Question } from '../shared/types.js';
-import { everywhere, inside, readStep, shown, type Field, type WidgetKind } from './read.js';
+import { everywhere, inside, PLACEHOLDER, readStep, shown, type Field, type WidgetKind } from './read.js';
 import { log } from './log.js';
 
 export interface Deps { previous?: { prompt: string; answer: string }; feedback?: string }
@@ -16,7 +16,8 @@ export type Result =
 
 const LONG_LIST = 100; // a list this long is cut off: search it instead of reading it
 // Pop-up options: the standard role, plus Workday's own names as a fallback.
-const OPTION = '[role=option], [data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [data-automation-id="menuItem"]';
+// Older react-select draws its options without a role, only ids like react-select-4-option-0.
+const OPTION = '[role=option], [id^="react-select-"][id*="-option-"],[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [data-automation-id="menuItem"]';
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const prompt = (f: Field) => (f.entry ? `${f.entry} > ${f.label}` : f.label);
@@ -90,7 +91,9 @@ async function typeIn(f: Field, d: Deps, force = false): Promise<Result> {
   // Date boxes the browser draws (type=date / month) take only their own format.
   const type = (f.els[0] as HTMLInputElement).type;
   const when = /^(date|month)$/.test(type) ? parseDate(a.value) : null;
-  const value = when?.year && when.month ? (type === 'month' ? `${when.year}-${when.month}` : `${when.year}-${when.month}-${when.day ?? '01'}`) : a.value;
+  // Number boxes take digits only: a month name ("September") goes into a month box (MM) as its number.
+  const monthNo = type === 'number' && /^[a-z]/i.test(a.value.trim()) ? parseDate(`${a.value.trim()} 2000`)?.month : undefined;
+  const value = when?.year && when.month ? (type === 'month' ? `${when.year}-${when.month}` : `${when.year}-${when.month}-${when.day ?? '01'}`) : monthNo ? String(+monthNo) : a.value;
   if (force || f.value !== value) {
     const before = new Set(visibleOptions(f));
     typeInto(f.els[0], value);
@@ -109,7 +112,9 @@ async function typeIn(f: Field, d: Deps, force = false): Promise<Result> {
 /** Native <select>: the options are right there. */
 async function native(f: Field, d: Deps): Promise<Result> {
   const sel = f.els[0] as HTMLSelectElement;
-  const opts = [...sel.options].filter((o) => o.text.trim() && !/^(select|choose)\b|^-+$/i.test(o.text.trim()));
+  const opts = [...sel.options].filter((o) => o.text.trim() && !PLACEHOLDER.test(o.text.trim()));
+  // Some dropdowns drawn over a select only fill it once their own list is opened: pick from that list.
+  if (!opts.length && f.face) return pick({ ...f, kind: 'pick', els: [f.face], editable: false, face: undefined }, d);
   const q = question(f, d, { candidates: opts.map((o) => o.text.trim()) });
   const a = await answer(q);
   if (a.kind !== 'pick') return notDone(q, a);
@@ -161,7 +166,7 @@ async function choose(f: Field, d: Deps): Promise<Result> {
  * empty, cut off, or has nothing that fits (suggestions only), search it with the answer, one term at a time.
  */
 async function pick(f: Field, d: Deps): Promise<Result> {
-  const el = f.els[0];
+  const el = f.els[0], was = f.value;
   const q = question(f, d);
   // Another field's list may still be on screen: close it, and only count options that appear after opening.
   key('Escape');
@@ -196,8 +201,15 @@ async function pick(f: Field, d: Deps): Promise<Result> {
     if (shows(f)) break;
     const before = options.map(optLabel).join('|');
     options = fresh(); // a sub-list, or nothing once the pick is made
-    // The same list again means the pick didn't take: stop rather than repeat it.
-    if (options.map(optLabel).join('|') === before) { key('Escape'); return notDone(q, unanswered(q, `picking "${chosen[chosen.length - 1]}" didn't take: the list stayed the same`)); }
+    // The same list again: a list that stays open after a pick (select several) shows the choice once it closes;
+    // otherwise the pick didn't take. Either way, stop rather than repeat it.
+    if (options.map(optLabel).join('|') === before) {
+      key('Escape');
+      await sleep(400);
+      const now = shows(f);
+      if (now && now !== was) break;
+      return notDone(q, unanswered(q, `picking "${chosen[chosen.length - 1]}" didn't take: the list stayed the same`));
+    }
   }
 
   if (!browse) {
@@ -265,6 +277,8 @@ async function date(f: Field, d: Deps): Promise<Result> {
 async function upload(f: Field, d: Deps, force = false): Promise<Result> {
   // A file is already there (an earlier fill, or the site's own autofill): never upload a second copy.
   if (!force && f.value) return { status: 'skipped', detail: `already attached: ${f.value}` };
+  // Some forms reload after reading a file and don't show it again (iCIMS): never upload twice in one fill.
+  if (!force && (await ask<string[]>({ t: 'uploads' }).catch((): string[] => [])).includes(f.label)) return { status: 'skipped', detail: 'already attached earlier in this fill' };
   const q = question(f, d, { attach: true });
   const a = await ask<Answer & { slot?: 'resume' | 'transcript' | 'cover_letter' }>({ t: 'answer', q });
   if (a.kind !== 'pick' || !a.slot) return notDone(q, a);
@@ -277,6 +291,7 @@ async function upload(f: Field, d: Deps, force = false): Promise<Result> {
   el.files = dt.files;
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+  await ask({ t: 'uploads', add: f.label }).catch(() => {}); // before waiting: the page may reload while it reads the file
   await sleep(1500); // the site uploads and may parse the file
   return filled(`uploaded ${a.slot.replace('_', ' ')}`, a.slot);
 }
