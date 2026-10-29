@@ -81,6 +81,8 @@ try {
   // 1: a whole one-page form, stopping at its Submit button.
   const p1 = await run(u(1));
   check('the bar starts docked to the side of the screen, and opens with a click', docked >= 1 && (await panel(p1).locator('button', { hasText: 'Fill page' }).isVisible()));
+  const hb = (await panel(p1).boundingBox())!;
+  check('the bar opened from the right edge stays on screen when its status line widens it', hb.x + hb.width <= 1280 && hb.width > 200, `${Math.round(hb.x)} + ${Math.round(hb.width)}`);
   const a1 = await item(u(1));
   check('job 1 is filled and stops at the submit button', a1?.status === 'filled' && /Submit Application/.test(await status(p1)), `${a1?.status}: ${await status(p1)}`);
   check('company/role read off page', a1?.company === 'Mockco' && a1?.role === 'Backend Engineer', `${a1?.company} / ${a1?.role}`);
@@ -255,6 +257,10 @@ try {
   const a23 = await item(u(23));
   check('embedded steps: job title read from the form, not the careers page around it', a23?.role === 'Embedded Steps Engineer' && a23?.company === 'Mockco', `${a23?.company} / ${a23?.role}`);
 
+  const p24 = await run(u(24));
+  const logged = await sw.evaluate(async () => JSON.stringify(await chrome.storage.session.get(null)));
+  check('repeated entries: each "I currently work here" box is its own question (current job ticked, the other not)', (await p24.locator('#cw24-1').isChecked()) && !(await p24.locator('#cw24-2').isChecked()));
+  check('a list showing only "No Items." is never picked from', !/offered[^\]]*No Items/.test(logged));
   const p22 = await run(u(22));
   check('sections whose title counts entries ("Phones (1)"): no extra entries added',
     (await p22.locator('#phones22 .row').count()) === 1 && (await p22.locator('#work22 .row').count()) === 1,
@@ -401,6 +407,21 @@ try {
   await setup.locator('#import').setInputFiles(backupFile);
   await setup.locator('.callout.t-ok').waitFor({ timeout: 5000 }).catch(() => {});
   check('Import brings everything back', (await setup.locator('input[name=first_name]').inputValue()) === 'Jane' && Object.keys(await history()).length >= 10);
+
+  // Auto-submit: off unless you turn it on; then it clicks Submit, but only on a form with nothing left for you.
+  const pa = await open(u(1));
+  await panel(pa).locator('button[aria-label=More]').click();
+  await panel(pa).locator('[role=menuitemcheckbox]', { hasText: 'Auto-submit' }).click();
+  await panel(pa).locator('button', { hasText: 'Fill & submit' }).waitFor({ timeout: 3000 }).catch(() => {});
+  check('Auto-submit switch: turned on from the menu, and the button says so', (await sw.evaluate(async () => (await chrome.storage.local.get('autoSubmit')).autoSubmit)) === true && await panel(pa).locator('button', { hasText: 'Fill & submit' }).isVisible());
+  const posted = submissions.length;
+  const pa3 = await run(u(3), 'Fill & submit');
+  check('Auto-submit: a form with questions left for you is not submitted', submissions.length === posted && /clearance/i.test(await needsText(pa3)), await status(pa3));
+  await panel(pa).locator('button', { hasText: 'Fill & submit' }).click();
+  for (let i = 0; i < 60 && submissions.length === posted; i++) await sleep(500);
+  for (let i = 0; i < 30 && (await item(u(1)))?.status !== 'applied'; i++) await sleep(500);
+  check('Auto-submit: a complete form is submitted and marked applied', submissions.length === posted + 1 && (await item(u(1)))?.status === 'applied', `${submissions.length - posted} submitted, ${(await item(u(1)))?.status}`);
+  await sw.evaluate(() => chrome.storage.local.set({ autoSubmit: false }));
 } catch (e) {
   console.error(e);
   failed++;

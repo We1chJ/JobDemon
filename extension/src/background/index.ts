@@ -152,7 +152,7 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
       return done;
     }
     case 'frames:click': {
-      const r = (await chrome.tabs.sendMessage(id, { t: 'click', text: m.text } satisfies ToFrame, { frameId: m.frameId }).catch(() => null)) as Reply<boolean> | null;
+      const r = (await chrome.tabs.sendMessage(id, { t: 'click', text: m.text, submit: m.submit } satisfies ToFrame, { frameId: m.frameId }).catch(() => null)) as Reply<boolean> | null;
       return !!(r?.ok && r.v);
     }
     case 'log': return appendLog(id, m.e);

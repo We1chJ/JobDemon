@@ -1,6 +1,6 @@
 // Notices when you submit an application yourself: your click on the site's Submit button, then whether it went
 // through (a thank-you page, or the form gone without errors). Only then does the job count as applied.
-// The bot never clicks Submit, so only real clicks (isTrusted) count.
+// Only real clicks (isTrusted) count here; JobDemon's own Submit (Auto-submit) is followed with trackSubmit.
 import { ask } from '../shared/msg.js';
 import { readStep } from './read.js';
 import { sleep } from './widgets.js';
@@ -34,6 +34,9 @@ async function submitted(button: Element) {
   log({ type: 'submit outcome', went_through: ok, errors: readStep().errors });
   if (ok !== null) await ask({ t: 'submit:done', ok }).catch(() => {});
 }
+
+/** JobDemon is about to click this Submit itself (Auto-submit): follow it like one of yours. */
+export const trackSubmit = (button: Element) => void submitted(button);
 
 export function watchSubmits() {
   document.addEventListener('click', (e) => {

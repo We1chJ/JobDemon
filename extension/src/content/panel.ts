@@ -1,9 +1,10 @@
-// The JobDemon bar on a job application: Fill page · ⋯ (cover letter, Dashboard, Setup, Hide).
+// The JobDemon bar on a job application: Fill page · ⋯ (cover letter, Auto-submit, Dashboard, Setup, Hide).
 // A line under it says what it's doing and which fields are left for you. Starts top right; drag the logo or
 // the bar to move it (kept for this tab and site). Plus a small button beside each field: fill just that one.
 import LOGO from '../../../assets/logo.svg';
 import { ask } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
+import { store } from '../shared/store.js';
 import { continueRun, fillOne, portalName, requestStop, type Say } from './engine.js';
 import { readJob } from './read.js';
 
@@ -100,10 +101,12 @@ export function showPanel(opts: { resume?: boolean } = {}) {
   // edge at the height it's at, and opening from the edge opens it right there. All kept for this tab and site.
   const SNAP = 48; // how close to an edge counts as "at the edge"
   const place = (x: number, y: number) => {
+    const vw = document.documentElement.clientWidth || window.innerWidth;
     const wd = host!.offsetWidth || 280, ht = host!.offsetHeight || 44;
-    x = Math.min(Math.max(0, x), window.innerWidth - Math.min(wd, window.innerWidth));
+    x = Math.min(Math.max(0, x), vw - Math.min(wd, vw));
     y = Math.min(Math.max(0, y), window.innerHeight - Math.min(ht, 44));
-    Object.assign(host!.style, { left: `${x}px`, top: `${y}px`, right: 'auto' });
+    // On the right half, hold its right edge: when the status line under it widens it, it grows to the left, not off screen.
+    Object.assign(host!.style, x + wd / 2 > vw / 2 ? { left: 'auto', right: `${vw - x - wd}px` } : { left: `${x}px`, right: 'auto' }, { top: `${y}px` });
     return { x, y };
   };
   const dockAt = (d: Dock) => {
@@ -125,7 +128,7 @@ export function showPanel(opts: { resume?: boolean } = {}) {
       remember(DOCK_KEY, dockAt((at && 'side' in at ? at : null) ?? here ?? recall<Dock>(DOCK_KEY) ?? { side: 'right', y: Math.round(window.innerHeight * 0.4) }));
     } else {
       w.classList.remove('left');
-      const here = placed && was ? { x: wasLeft ? 8 : window.innerWidth - host!.offsetWidth - 8, y: r.top } : null;
+      const here = placed && was ? { x: wasLeft ? 8 : (document.documentElement.clientWidth || window.innerWidth) - host!.offsetWidth - 8, y: r.top } : null;
       const p = (at && 'x' in at ? at : null) ?? here ?? recall<{ x: number; y: number }>(POS_KEY);
       if (p) remember(POS_KEY, place(p.x, p.y)); else Object.assign(host!.style, { left: 'auto', right: '16px', top: '16px' });
     }
@@ -178,12 +181,19 @@ export function showPanel(opts: { resume?: boolean } = {}) {
     showSub();
   };
   // While it works, the button is Stop.
+  // Auto-submit on: the button says so, and the menu shows it ticked.
+  let auto = false;
   const working = (on: boolean) => {
     busy = on;
     w.classList.toggle('busy', on);
-    go.textContent = on ? 'Stop' : 'Fill page';
-    go.title = on ? 'Stop after the field it is on' : 'Fill this page and the next ones, up to Submit';
+    go.textContent = on ? 'Stop' : auto ? 'Fill & submit' : 'Fill page';
+    go.title = on ? 'Stop after the field it is on' : auto ? 'Fill this page and the next ones, then click Submit if nothing is left for you' : 'Fill this page and the next ones, up to Submit';
   };
+  const autoItem = item('Auto-submit', () => void store.setAutoSubmit(!auto));
+  autoItem.setAttribute('role', 'menuitemcheckbox');
+  const showAuto = (on: boolean) => { auto = on; autoItem.textContent = `${on ? '✓ ' : ''}Auto-submit`; autoItem.setAttribute('aria-checked', String(on)); working(busy); };
+  void store.autoSubmit().then(showAuto);
+  chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.autoSubmit) showAuto(!!c.autoSubmit.newValue); });
   const guard = (fn: () => Promise<unknown>) => async () => {
     if (busy) return;
     working(true);
@@ -213,6 +223,7 @@ export function showPanel(opts: { resume?: boolean } = {}) {
   };
   menu.append(
     item('Cover letter', () => void openLetter()),
+    autoItem,
     el('hr'),
     item('Dashboard', () => void ask({ t: 'open', page: 'dashboard' })),
     item('Setup', () => void ask({ t: 'open', page: 'setup' })),

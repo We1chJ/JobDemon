@@ -5,7 +5,9 @@
 import { ask, type FillReport, type Look, type Run } from '../shared/msg.js';
 import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
+import { store } from '../shared/store.js';
 import { inside, readJob, readStep, type Field, type Step } from './read.js';
+import { trackSubmit } from './submit.js';
 import { WIDGETS, key, press, sleep } from './widgets.js';
 import { log, snapshot } from './log.js';
 
@@ -136,9 +138,10 @@ export function look(job = false): Look {
     buttons: s.buttons.map(({ text, autoId, footer }) => ({ text, autoId, footer })), job: job ? readJob() : undefined,
   };
 }
-/** Click this frame's button with these words. */
-export function clickButton(text: string) {
+/** Click this frame's button with these words. A Submit is followed to see whether it went through. */
+export function clickButton(text: string, submit = false) {
   const b = readStep().buttons.find((x) => x.text === text);
+  if (b && submit) trackSubmit(b.el);
   if (b) press(b.el);
   return !!b;
 }
@@ -151,9 +154,9 @@ async function view(job = false): Promise<Look> {
   const form = [here, ...frames].filter((l) => l.fields || l.signIn).sort((a, b) => b.fields - a.fields)[0];
   return form ?? { ...here, buttons: [...here.buttons, ...frames.flatMap((l) => l.buttons)] };
 }
-const click = async (b: Way) => {
-  if (b.frame === undefined) clickButton(b.text);
-  else await ask({ t: 'frames:click', frameId: b.frame, text: b.text });
+const click = async (b: Way, submit = false) => {
+  if (b.frame === undefined) clickButton(b.text, submit);
+  else await ask({ t: 'frames:click', frameId: b.frame, text: b.text, submit });
 };
 const where = (v: Look) => `${v.frame ?? 'page'}#${v.tag}`;
 
@@ -269,6 +272,12 @@ export async function continueRun(say: Say, resume = false) {
       // Nothing to click yet: the page may still be drawing after the last click.
       if (!next && !report.fields && Date.now() - run.lastClickAt < 20000) { await sleep(1500); continue; }
       const submit = step.buttons.find((b) => SUBMIT.test(b.text));
+      // Auto-submit (your switch on the bar): only a complete form, with nothing left for you and no messages on it.
+      if (submit && (await store.autoSubmit()) && !report.needs.length && !step.errors.length && !step.flagged.length) {
+        log({ type: 'auto-submit', button: submit.text });
+        await click(submit, true);
+        return stop(`Auto-submit: clicked "${submit.text}". Checking it went through…`);
+      }
       return stop(submit ? `Done. Check it, then click "${submit.text}".` : 'Done. Check the page, then submit it.');
     }
     // Tries: 0 = first click; 1 = the page refused, answer its flagged fields again; 2 = second click; 3 = give up.

@@ -31,7 +31,8 @@ retyping the same profile, work history and screening answers into every company
   every application reuses them.
 - **You stay in control.** A small bar tucked at the side of the page: *Fill page* fills it and goes
   on page by page, stopping at Submit, which you click yourself (JobDemon notices and marks it
-  applied). Point at any field for a button that fills just that one. It never submits.
+  applied). Point at any field for a button that fills just that one. It never submits, unless you
+  turn on *Auto-submit* in the ⋯ menu: then it clicks Submit, but only when nothing is left for you.
 - **You set the rules.** Plain-English guidelines ("always opt in to future openings", "never
   guess demographic questions") steer every answer, with no code to change.
 - **Private by default.** No server: your profile, files, keys and history stay in your browser.

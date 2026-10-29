@@ -188,6 +188,8 @@ function readOnce(): Step {
       const holder = closest(el, '[role=radiogroup], [role=group], fieldset');
       const name = input(el).name;
       let same = name ? ctrls.filter((x) => roleOf(x) === t && input(x).name === name && !groupOf.has(x)) : [];
+      // Repeated entries (Workday's work history) give each entry's own checkbox the same name: only its group's count.
+      if (t === 'checkbox' && holder) same = same.filter((x) => within(holder, x));
       if (same.length < 2 && holder) same = ctrls.filter((x) => roleOf(x) === t && within(holder, x) && !groupOf.has(x));
       if (same.length < 2) same = [el];
       addGroup(same, t === 'radio' ? 'radio' : same.length > 1 ? 'checkgroup' : 'checkbox');

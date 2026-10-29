@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -558,6 +558,21 @@ rsIn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') open(); if 
 </script></body></html>`);
   });
   // 22: iCIMS-style repeating sections: the title carries the entry count and a required mark ("Phones (1)* required.").
+  // 24: Workday-style repeated entries whose "I currently work here" boxes all share one name, and a list that
+  // shows only "No Items.".
+  app.get('/jobs/24', (c) => {
+    const entry = (n: number, title: string) => `<div role="group" aria-labelledby="wh24-${n}" class="entry"><h4 id="wh24-${n}">Work Experience ${n}</h4>
+<div><label for="jt24-${n}">Job Title *</label><input id="jt24-${n}" value="${title}" required></div>
+<div><input type="checkbox" name="currentlyWorkHere" id="cw24-${n}"><label for="cw24-${n}">I currently work here</label></div></div>`;
+    return c.html(`<!doctype html><html><head><title>${ROLES['24']} | Mockco Careers</title></head><body><h1>${ROLES['24']}</h1>${JD}
+<form id="f24"><div><label for="fn24">First Name *</label><input id="fn24" required></div>
+<section role="group" aria-labelledby="work24"><h3 id="work24">Work Experience</h3>${entry(1, 'Software Engineer')}${entry(2, 'Intern')}<button type="button" class="add">Add Another</button></section>
+<div><label for="sk24">Skills</label><input id="sk24" role="combobox" aria-expanded="false" aria-controls="sk24-list"><ul role="listbox" id="sk24-list" hidden><li role="option">No Items.</li></ul></div>
+<button type="button">Submit</button></form>
+<script>const sk = document.getElementById('sk24'), skl = document.getElementById('sk24-list');
+sk.addEventListener('click', () => { skl.hidden = false; sk.setAttribute('aria-expanded', 'true'); });
+sk.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { skl.hidden = false; sk.setAttribute('aria-expanded', 'true'); } });</script></body></html>`);
+  });
   app.get('/jobs/22', (c) => {
     const sec = (id: string, title: string, row: string) => `<div class="sec" id="${id}"><h3><span class="t">${title} (1)</span><span>*</span> required.</h3>
 <div class="rows"><div class="row">${row}</div></div><button type="button" class="add">Add More <span>(${title})</span></button></div>`;

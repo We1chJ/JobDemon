@@ -13,7 +13,7 @@ chrome.runtime.onMessage.addListener((m: ToFrame, _sender, reply: (r: Reply<unkn
   if (m.t === 'stop') setStopping(true);
   if (m.t === 'fill') { setStopping(false); fillFrame(() => {}, m.retry).then((v) => reply({ ok: true, v }), (e: Error) => reply({ ok: false, error: e.message })); return true; }
   if (m.t === 'look') { reply({ ok: true, v: lookHere(m.job) }); return false; }
-  if (m.t === 'click') { reply({ ok: true, v: clickButton(m.text) }); return false; }
+  if (m.t === 'click') { reply({ ok: true, v: clickButton(m.text, m.submit) }); return false; }
   if (m.t === 'hover') hover();
   if (m.t === 'show' && top) revealPanel();
   if (m.t === 'applied' && top) appliedNotice();

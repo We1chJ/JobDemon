@@ -53,6 +53,9 @@ export const store = {
   setSettings: async (s: Partial<Settings>) => set('settings', { ...(await store.settings()), ...s }),
   file: (k: FileKey) => get<StoredFile | null>(`file:${k}`, null),
   setFile: (k: FileKey, f: StoredFile | null) => (f ? set(`file:${k}`, f) : area().remove(`file:${k}`)),
+  /** Your switch on the bar: click Submit when a form is complete. Off unless you turn it on. */
+  autoSubmit: () => get<boolean>('autoSubmit', false),
+  setAutoSubmit: (on: boolean) => set('autoSubmit', on),
   history: () => get<Record<string, HistoryItem>>('history', {}),
   setHistory: (h: Record<string, HistoryItem>) => set('history', h),
   /** Written answers already generated for a job, so a re-fill reuses them instead of writing again. */

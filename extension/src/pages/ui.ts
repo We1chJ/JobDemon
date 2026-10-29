@@ -35,7 +35,7 @@ export function render(active: 'dashboard' | 'letter' | 'setup', body: Html) {
 <header class="top"><div class="top-in">
 <a class="brand" href="dashboard.html"><img src="${ICON}" alt="" width="26" height="30">JobDemon</a>
 <nav class="nav" aria-label="Main">${link('dashboard', 'Applications')}${link('letter', 'Cover letter')}${link('setup', 'Setup')}</nav>
-<span class="mode" title="JobDemon fills forms but never submits them">Fills forms, never submits</span>
+<span class="mode" title="JobDemon fills forms. It submits only if you turn on Auto-submit (⋯ menu on the bar), and only a form with nothing left for you">Fills forms, you decide on submit</span>
 </div></header>
 <main id="main">${body}</main>`.s;
   const icon = document.querySelector<HTMLLinkElement>('link[rel=icon]') ?? document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'icon' }));

@@ -68,10 +68,13 @@ function typeInto(el: HTMLElement, value: string) {
 }
 const leave = (el: HTMLElement) => { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur(); };
 
+// A list's own "nothing here" line, drawn as an option.
+const NO_RESULTS = /^(no (items|results|matches|options)( found)?|nothing found)\.?$/i;
+
 /** Options showing right now (outside the field, or inside it but not already chosen). */
 function visibleOptions(f: Field): HTMLElement[] {
   // Lists may be drawn inside a web component: look through them too.
-  const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true'));
+  const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true') && !NO_RESULTS.test(optLabel(n)));
   return opts.filter((n) => !opts.some((m) => m !== n && m.contains(n)));
 }
 const optLabel = (n: HTMLElement) => (n.getAttribute('data-automation-label') || n.innerText || n.textContent || '').trim();

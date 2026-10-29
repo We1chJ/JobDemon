@@ -25,7 +25,7 @@ export type ToBackground =
   | { t: 'frames'; op: 'fill' | 'hover' | 'stop'; retry?: boolean }
   | { t: 'frames:look'; job?: boolean }
   | { t: 'uploads'; add?: string; clear?: boolean }
-  | { t: 'frames:click'; frameId: number; text: string }
+  | { t: 'frames:click'; frameId: number; text: string; submit?: boolean }
   | { t: 'log'; e: Record<string, unknown> }
   | { t: 'report' }
   | { t: 'submit:pending' }
@@ -33,7 +33,7 @@ export type ToBackground =
   | { t: 'submit:done'; ok: boolean }
   | { t: 'open'; page: 'setup' | 'dashboard' | 'letter' };
 
-export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'hover' } | { t: 'show' } | { t: 'applied' } | { t: 'stop' } | { t: 'look'; job?: boolean } | { t: 'click'; text: string };
+export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'hover' } | { t: 'show' } | { t: 'applied' } | { t: 'stop' } | { t: 'look'; job?: boolean } | { t: 'click'; text: string; submit?: boolean };
 
 export type Reply<T> = { ok: true; v: T } | { ok: false; error: string };
 export type AnswerReply = Answer;
