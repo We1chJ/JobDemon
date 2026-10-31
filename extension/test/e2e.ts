@@ -34,7 +34,7 @@ await sw.evaluate((data) => chrome.storage.local.set(data), {
   profile, bank: tpl('answer_bank.example.json'), settings: { typesafeKey: '', openaiKey: '', openaiModel: 'gpt-4.1', fake: true },
   'file:resume': pdf('resume.pdf', '%PDF-1.4 fake resume'), 'file:transcript': pdf('transcript.pdf', '%PDF-1.4 fake transcript'),
 });
-const history = () => sw.evaluate(async () => (await chrome.storage.local.get('history')).history ?? {}) as Promise<Record<string, { url: string; status: string; needs: string[]; company: string; role: string; letter?: string }>>;
+const history = () => sw.evaluate(async () => (await chrome.storage.local.get('history')).history ?? {}) as Promise<Record<string, { url: string; status: string; needs: string[]; company: string; role: string; letter?: string; actions?: Record<string, number> }>>;
 const item = async (url: string) => Object.values(await history()).find((h) => h.url.replace(/\/$/, '') === url.replace(/\/$/, ''));
 const runs = () => sw.evaluate(async () => Object.keys(await chrome.storage.session.get(null)).filter((k) => k.startsWith('run:')).length);
 
@@ -82,9 +82,10 @@ try {
   const p1 = await run(u(1));
   check('the bar starts docked to the side of the screen, and opens with a click', docked >= 1 && (await panel(p1).locator('button', { hasText: 'Fill page' }).isVisible()));
   const hb = (await panel(p1).boundingBox())!;
-  check('the bar opened from the right edge stays on screen when its status line widens it', hb.x + hb.width <= 1280 && hb.width > 200, `${Math.round(hb.x)} + ${Math.round(hb.width)}`);
+  check('the open bar keeps its width and stays on screen with a status line under it', hb.x + hb.width <= 1280 && Math.round(hb.width) === 300, `${Math.round(hb.x)} + ${Math.round(hb.width)}`);
   const a1 = await item(u(1));
   check('job 1 is filled and stops at the submit button', a1?.status === 'filled' && /Submit Application/.test(await status(p1)), `${a1?.status}: ${await status(p1)}`);
+  check('the fill counts what it did, for the Time saved card', (a1?.actions?.typed ?? 0) >= 4 && (a1?.actions?.picked ?? 0) >= 2 && (a1?.actions?.uploaded ?? 0) >= 1, JSON.stringify(a1?.actions));
   check('company/role read off page', a1?.company === 'Mockco' && a1?.role === 'Backend Engineer', `${a1?.company} / ${a1?.role}`);
   check('structured fields mapped from profile', (await val(p1, '#first_name')) === 'Jane' && (await val(p1, '#email')) === 'jane@example.com' && (await val(p1, '#linkedin')) === 'https://www.linkedin.com/in/janedoe');
   check('answer bank used for select + radio', (await selected(p1, '#auth')) === 'Yes' && (await p1.locator('input[name=sponsor][value=no]').isChecked()));
@@ -261,6 +262,10 @@ try {
   const logged = await sw.evaluate(async () => JSON.stringify(await chrome.storage.session.get(null)));
   check('repeated entries: each "I currently work here" box is its own question (current job ticked, the other not)', (await p24.locator('#cw24-1').isChecked()) && !(await p24.locator('#cw24-2').isChecked()));
   check('a list showing only "No Items." is never picked from', !/offered[^\]]*No Items/.test(logged));
+  check('"How did you hear" with no fit picks the first real option, not the "Select One" prompt', (await p24.locator('#hd24').innerText()) === 'Career Fair', await p24.locator('#hd24').innerText());
+  check("an extra half-empty job entry (from a site's resume reader) is removed", (await p24.locator('#jt24-3').count()) === 0 && (await p24.locator('#jt24-1').count()) === 1);
+  check('a long dropdown that stays closed while you type is searched and picked', (await p24.locator('#ct24-val').innerText()) === 'United States +1', await p24.locator('#ct24-val').innerText());
+  check('a search with no match leaves nothing behind and is left for you', (await val(p24, '#cy24')) === '' && /Current City/.test(await needsText(p24)), `"${await val(p24, '#cy24')}" ${await needsText(p24)}`);
   const p22 = await run(u(22));
   check('sections whose title counts entries ("Phones (1)"): no extra entries added',
     (await p22.locator('#phones22 .row').count()) === 1 && (await p22.locator('#work22 .row').count()) === 1,
@@ -360,11 +365,17 @@ try {
   await panel(p1).locator('.t').filter({ hasText: 'Submitted' }).waitFor({ timeout: 5000 }).catch(() => {});
   check('the bar says it was marked applied', /Submitted/.test(await status(p1)), await status(p1));
 
+  const p25 = await run(u(25));
+  await p25.locator('#go25').click();
+  await sleep(6000);
+  check('a frame reloading on the page never counts as your Submit going through', (await item(u(25)))?.status !== 'applied', (await item(u(25)))?.status);
+
   // The extension's own pages.
   const dash = await ctx.newPage();
   await dash.goto(`chrome-extension://${new URL(sw.url()).host}/pages/dashboard.html`);
   await dash.locator('.cc').first().waitFor({ timeout: 5000 }).catch(() => {});
   check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '1');
+  check('Dashboard: Time saved is the big card on top, an estimate from your applications', /^[1-9\d.]+ (minutes|hours)$/.test(await dash.locator('.hero-value').innerText()), await dash.locator('.hero-value').innerText());
   await dash.locator('a', { hasText: 'Show all applications' }).click();
   await dash.locator('.tbl').waitFor({ timeout: 5000 }).catch(() => {});
   const listed = await dash.locator('.tbl tbody tr').count(), pager = await dash.locator('.pager').innerText().catch(() => '');

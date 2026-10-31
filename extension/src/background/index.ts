@@ -4,11 +4,13 @@ import { answerQuestion } from '../shared/answer.js';
 import { buildContext } from '../shared/context.js';
 import type { FillReport, Look, Reply, Run, ToBackground, ToFrame } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
-import { profileVersion, store, toBase64, updateHistory } from '../shared/store.js';
+import { jobKey, profileVersion, store, toBase64, updateHistory } from '../shared/store.js';
 import type { Context, JobCtx } from '../shared/types.js';
-import { coverLetter, makeBrain } from './ai.js';
+import { coverLetter, jobInfo, letterForPosting, makeBrain } from './ai.js';
 
 interface TabJob { job: JobCtx; portal?: string }
+/** A Submit being followed: which job, in which frame. */
+interface Sent { at: number; url: string; frame: number; sent: TabJob }
 const session = chrome.storage.session;
 const tabJob = async (tab: chrome.tabs.Tab): Promise<TabJob> =>
   ((await session.get(`job:${tab.id}`))[`job:${tab.id}`] as TabJob | undefined) ?? { job: { url: tab.url ?? '', company: '', role: '', jd: '' } };
@@ -90,6 +92,12 @@ const vague = (j: JobCtx) => !j.role || squash(j.role) === squash(j.company) || 
 async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const tab = sender.tab;
   if (m.t === 'open') return chrome.tabs.create({ url: chrome.runtime.getURL(`pages/${m.page}.html`) });
+  // The Cover letter page: the AI keys are only used from here, never from a page.
+  if (m.t === 'letter:posting') {
+    const s = await store.settings();
+    const job = await jobInfo(s, m.jd); // the company and role come from the posting itself
+    return job.company && job.role ? { ...job, ...await letterForPosting(s, { ...job, jd: m.jd }, await store.profile()) } : job;
+  }
   if (!tab?.id) throw new Error('not from a tab');
   const id = tab.id;
   switch (m.t) {
@@ -140,6 +148,11 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
       const { job, portal } = await tabJob(tab);
       return updateHistory(job.url, { company: job.company, role: job.role, portal: portal ?? '', ...m.patch });
     }
+    case 'did': {
+      const { job } = await tabJob(tab);
+      const done = (await store.history())[jobKey(job.url)]?.actions;
+      return updateHistory(job.url, { actions: { ...done, [m.action]: (done?.[m.action] ?? 0) + 1 } });
+    }
     case 'run:get': return ((await session.get(`run:${id}`))[`run:${id}`] as Run | undefined) ?? null;
     case 'run:set': return m.run ? session.set({ [`run:${id}`]: m.run }) : session.remove(`run:${id}`);
     case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: m.op });
@@ -160,18 +173,21 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
     case 'submit:pending': {
       // Only on pages JobDemon knows as a job application (it showed its bar there).
       if (!(await session.get(`job:${id}`))[`job:${id}`]) return false;
-      await session.set({ [`submit:${id}`]: { at: Date.now(), url: sender.url ?? tab.url ?? '' } });
+      // Remember which job and frame: the tab may move on to another page before the result is known.
+      await session.set({ [`submit:${id}`]: { at: Date.now(), url: sender.url ?? tab.url ?? '', frame: sender.frameId ?? 0, sent: await tabJob(tab) } });
       return true;
     }
     case 'submit:get': {
-      const p = (await session.get(`submit:${id}`))[`submit:${id}`] as { at: number; url: string } | undefined;
-      return p && Date.now() - p.at < 120000 ? p : null;
+      // Only the frame that was submitted: another frame loading (a captcha, an ad) says nothing about it.
+      const p = (await session.get(`submit:${id}`))[`submit:${id}`] as Sent | undefined;
+      return p && Date.now() - p.at < 120000 && p.frame === (sender.frameId ?? 0) ? p : null;
     }
     case 'submit:done': {
-      if (!(await session.get(`submit:${id}`))[`submit:${id}`]) return null;
+      const sent = (await session.get(`submit:${id}`))[`submit:${id}`] as Sent | undefined;
+      if (!sent) return null;
       await session.remove(`submit:${id}`);
       if (!m.ok) return null;
-      const { job, portal } = await tabJob(tab);
+      const { job, portal } = sent.sent;
       await updateHistory(job.url, { company: job.company, role: job.role, portal: portal ?? '', status: 'applied', needs: [] });
       await session.remove(`run:${id}`);
       await chrome.tabs.sendMessage(id, { t: 'applied' } satisfies ToFrame, { frameId: 0 }).catch(() => {});

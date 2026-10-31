@@ -9,7 +9,7 @@ export const STATUS: Record<HistoryStatus, { label: string; tone: string; hint: 
   needs_you: { label: 'Needs you', tone: 'warn', hint: 'Some fields were left for you' },
   filled: { label: 'Ready to submit', tone: 'info', hint: 'Filled in. Check it and click Submit yourself.' },
   in_progress: { label: 'Started', tone: 'violet', hint: 'JobDemon started on it' },
-  applied: { label: 'Applied', tone: 'ok', hint: 'You marked it submitted' },
+  applied: { label: 'Applied', tone: 'ok', hint: 'Submitted' },
   removed: { label: 'Removed', tone: 'neutral', hint: 'Removed from the list' },
 };
 export const badge = (s: HistoryStatus) => html`<span class="st t-${STATUS[s]?.tone ?? 'neutral'}" title="${STATUS[s]?.hint ?? ''}">${STATUS[s]?.label ?? s}</span>`;

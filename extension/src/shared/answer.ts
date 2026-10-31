@@ -33,7 +33,7 @@ export async function answerQuestion(q: Question, ctx: Context, brain: Brain): P
     if (!q.candidates.length) return unanswered(q, 'the form offered no options');
     const r = await brain.pick(q as Question & { candidates: string[] }, ctx);
     if (!r.indexes.length) return HEARD.test(q.prompt) ? { kind: 'pick', indexes: [0], because: `no option fits, so the first: "${q.candidates[0]}"` } : unanswered(q, 'no option fits your data');
-    return { kind: 'pick', indexes: r.indexes, because: `chose ${r.indexes.map((i) => `"${q.candidates![i]}"`).join(', ')}` };
+    return { kind: 'pick', indexes: r.indexes, confidence: r.confidence, because: `chose ${r.indexes.map((i) => `"${q.candidates![i]}"`).join(', ')} (confidence ${r.confidence.toFixed(2)})` };
   }
   const s = await brain.source(q, ctx);
   // A required question can't stay blank: it's left for you instead.

@@ -23,3 +23,9 @@ export const DEFAULT_GUIDELINES = [
   'Answer whenever a fact supports it, optional questions included. Say unknown only when nothing in the applicant data applies.',
   'Always attach the resume to a resume upload and the cover letter to a cover letter upload, even when the upload is optional.',
 ];
+
+// Sent with every question even when Setup's guidelines are customised (a customised list never gets new defaults).
+export const ALWAYS_GUIDELINES = [
+  'If asked whether the applicant has worked for a government or public institution, or held a government or public-official role, answer No unless the applicant data names a government or public body as a direct employer. Working at a private company with government customers, users or contracts does not count.',
+  'Tick "I have a preferred name" (or similar) only if the applicant\'s preferred name is different from their legal first name.',
+];

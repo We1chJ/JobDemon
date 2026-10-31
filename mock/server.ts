@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -141,7 +141,10 @@ $$('.wd-search').forEach((box) => {
   input.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return; e.preventDefault();
     const list = which === 'phoneCode' ? codes : which === 'skills' ? skillList : Object.values(tree).flat();
-    openPop(box, list.filter((c) => c.toLowerCase().includes(input.value.toLowerCase())), (t) => pill(box, t));
+    // Like Workday: a skills list stays open after a pick, still showing it, until the next search.
+    const found = list.filter((c) => c.toLowerCase().includes(input.value.toLowerCase()));
+    const show = () => openPop(box, found, (t) => { pill(box, t); if (which === 'skills') show(); });
+    show();
   });
 });
 // Repeating sections.
@@ -563,16 +566,35 @@ rsIn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') open(); if 
   app.get('/jobs/24', (c) => {
     const entry = (n: number, title: string) => `<div role="group" aria-labelledby="wh24-${n}" class="entry"><h4 id="wh24-${n}">Work Experience ${n}</h4>
 <div><label for="jt24-${n}">Job Title *</label><input id="jt24-${n}" value="${title}" required></div>
-<div><input type="checkbox" name="currentlyWorkHere" id="cw24-${n}"><label for="cw24-${n}">I currently work here</label></div></div>`;
+<div><input type="checkbox" name="currentlyWorkHere" id="cw24-${n}"><label for="cw24-${n}">I currently work here</label></div>${n === 3 ? '<button type="button" class="del24" onclick="this.closest(\'.entry\').remove()">Delete</button>' : ''}</div>`;
     return c.html(`<!doctype html><html><head><title>${ROLES['24']} | Mockco Careers</title></head><body><h1>${ROLES['24']}</h1>${JD}
 <form id="f24"><div><label for="fn24">First Name *</label><input id="fn24" required></div>
-<section role="group" aria-labelledby="work24"><h3 id="work24">Work Experience</h3>${entry(1, 'Software Engineer')}${entry(2, 'Intern')}<button type="button" class="add">Add Another</button></section>
+<section role="group" aria-labelledby="work24"><h3 id="work24">Work Experience</h3>${entry(1, 'Software Engineer')}${entry(2, 'Intern')}${entry(3, '')}<button type="button" class="add">Add Another</button></section>
 <div><label for="sk24">Skills</label><input id="sk24" role="combobox" aria-expanded="false" aria-controls="sk24-list"><ul role="listbox" id="sk24-list" hidden><li role="option">No Items.</li></ul></div>
+<div><label for="hd24">How Did You Hear About Us? *</label><button type="button" id="hd24" aria-haspopup="listbox" aria-required="true">Select One</button><ul role="listbox" id="hd24-list" hidden><li role="option">Select One</li><li role="option">Career Fair</li><li role="option">Employee Referral</li></ul></div>
+<div><label for="ct24">Country *</label><div class="single-value" id="ct24-val"></div><input id="ct24" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-required="true"><ul role="listbox" id="ct24-list" hidden></ul></div>
+<div><label for="cy24">Current City *</label><input id="cy24" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-required="true"><ul role="listbox" id="cy24-list" hidden></ul></div>
 <button type="button">Submit</button></form>
-<script>const sk = document.getElementById('sk24'), skl = document.getElementById('sk24-list');
+<script>// Like Greenhouse's dropdowns: a long list that stays closed while you type; the down arrow opens it on what was typed.
+const ct = document.getElementById('ct24'), ctl = document.getElementById('ct24-list'), names = ['Afghanistan +93', 'United States +1', ...Array.from({ length: 150 }, (_, i) => 'Land ' + i)];
+const showCt = () => { ctl.innerHTML = names.filter((n) => n.toLowerCase().includes(ct.value.toLowerCase())).map((n) => '<li role="option">' + n + '</li>').join(''); ctl.hidden = false; ct.setAttribute('aria-expanded', 'true'); };
+const hideCt = () => { ctl.hidden = true; ct.setAttribute('aria-expanded', 'false'); };
+ct.addEventListener('click', showCt);
+ct.addEventListener('input', () => { if (!ctl.hidden) showCt(); });
+ct.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') showCt(); if (e.key === 'Escape' && !ctl.hidden) { hideCt(); ct.value = ''; } });
+ctl.addEventListener('click', (e) => { const o = e.target.closest('[role=option]'); if (!o) return; document.getElementById('ct24-val').textContent = o.textContent; ct.value = ''; hideCt(); });
+const hd = document.getElementById('hd24'), hdl = document.getElementById('hd24-list');
+hd.addEventListener('click', () => { hdl.hidden = !hdl.hidden; });
+hdl.addEventListener('click', (e) => { const o = e.target.closest('[role=option]'); if (!o) return; hd.textContent = o.textContent; hdl.hidden = true; });
+const sk = document.getElementById('sk24'), skl = document.getElementById('sk24-list');
 sk.addEventListener('click', () => { skl.hidden = false; sk.setAttribute('aria-expanded', 'true'); });
 sk.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { skl.hidden = false; sk.setAttribute('aria-expanded', 'true'); } });</script></body></html>`);
   });
+  // 25: a Submit the site refuses after a few seconds, while a frame on the page reloads (like a captcha).
+  app.get('/jobs/25', (c) => c.html(`<!doctype html><html><head><title>${ROLES['25']} | Mockco Careers</title></head><body><h1>${ROLES['25']}</h1>${JD}
+<form onsubmit="return false"><div><label for="fn25">First Name *</label><input id="fn25" required></div><div><label for="ln25">Last Name *</label><input id="ln25" required></div><div><label for="em25">Email *</label><input id="em25" type="email" required></div>
+<iframe id="cap25" src="/jobs/9" width="300" height="80"></iframe><p role="alert" id="err25"></p>
+<button type="button" id="go25" onclick="setTimeout(() => document.getElementById('cap25').src = '/jobs/9?again=1', 300); setTimeout(() => document.getElementById('err25').textContent = 'Error: please fix the form', 3000)">Submit</button></form></body></html>`));
   app.get('/jobs/22', (c) => {
     const sec = (id: string, title: string, row: string) => `<div class="sec" id="${id}"><h3><span class="t">${title} (1)</span><span>*</span> required.</h3>
 <div class="rows"><div class="row">${row}</div></div><button type="button" class="add">Add More <span>(${title})</span></button></div>`;

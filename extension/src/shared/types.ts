@@ -44,7 +44,7 @@ export interface Question {
 }
 
 export type Answer =
-  | { kind: 'pick'; indexes: number[]; because: string }
+  | { kind: 'pick'; indexes: number[]; because: string; confidence?: number }
   | { kind: 'text'; value: string; because: string; file?: string }
   | { kind: 'skip'; because: string }
   | { kind: 'unknown'; because: string };

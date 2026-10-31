@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { html, raw } from '../shared/html.js';
-import { store, type HistoryItem, type HistoryStatus } from '../shared/store.js';
+import { store, type Action, type HistoryItem, type HistoryStatus } from '../shared/store.js';
 import { STATUS, ago, badge, render } from './ui.js';
 
 // ── Numbers for the charts ──────────────────────────────────────────────────
@@ -14,7 +14,18 @@ interface Stats {
   daily: { date: string; added: number; submitted: number }[]; // last 30 days
   status: { name: string; value: number; tone: string }[];
   portals: { name: string; value: number }[];
+  saved: { total: number; thisWeek: number; apps: number; weeks: { week: string; hours: number }[] }; // seconds; hours per week, last 8 weeks
 }
+// An estimate of what each thing takes by hand, in seconds. Applications from before actions were counted: a flat 15 minutes.
+const SECONDS: Record<Action, number> = { typed: 15, picked: 10, ticked: 5, uploaded: 30, pages: 15, written: 300, letters: 1200 };
+const FLAT = 900;
+function savedBy(a: HistoryItem) {
+  if (!a.actions) return a.status === 'in_progress' ? 0 : FLAT;
+  const done = { ...a.actions, letters: Math.max(a.actions.letters ?? 0, a.letter ? 1 : 0) };
+  return (Object.keys(SECONDS) as Action[]).reduce((n, k) => n + (done[k] ?? 0) * SECONDS[k], 0);
+}
+const big = (s: number): [string, string] => (s < 3600 ? [String(Math.round(s / 60)), 'minutes'] : [(s / 3600).toFixed(1), 'hours']);
+const span = (s: number) => (s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const localDay = (iso: string) => ymd(new Date(iso));
 const portalOf = (a: HistoryItem) => { if (a.portal) return a.portal; try { return new URL(a.url).hostname.replace(/^(www|jobs|careers|job-boards)\./, '').split('.')[0]; } catch { return 'Other'; } };
@@ -42,9 +53,13 @@ function computeStats(apps: HistoryItem[]): Stats {
   const top = portals.slice(0, 5);
   if (portals.length > 5) top.push({ name: 'Other', value: portals.slice(5).reduce((n, p) => n + p.value, 0) });
   const weekStart = ymd(back(today.getDay()));
+  const savedIn = new Map<string, number>();
+  for (const a of apps) { const d = new Date(a.createdAt); d.setDate(d.getDate() - d.getDay()); savedIn.set(ymd(d), (savedIn.get(ymd(d)) ?? 0) + savedBy(a)); }
+  const weeks = Array.from({ length: 8 }, (_, i) => { const week = ymd(back(today.getDay() + 7 * (7 - i))); return { week, hours: +((savedIn.get(week) ?? 0) / 3600).toFixed(1) }; });
   return {
     totals: { all: apps.length, submitted: count('applied'), thisWeek: [...submittedOn].filter(([k]) => k >= weekStart).reduce((n, [, v]) => n + v, 0), needYou: count('needs_you') + count('filled') },
     heatmap, daily, status, portals: top,
+    saved: { total: [...savedIn.values()].reduce((n, v) => n + v, 0), thisWeek: savedIn.get(weekStart) ?? 0, apps: apps.filter((a) => savedBy(a) > 0).length, weeks },
   };
 }
 
@@ -90,9 +105,35 @@ function Heatmap({ days }: { days: Stats['heatmap'] }) {
   );
 }
 
+/** The headline: how much time JobDemon has given you back, and the last 8 weeks of it. */
+function Saved({ s }: { s: Stats['saved'] }) {
+  const [value, unit] = big(s.total);
+  return (
+    <section className="hero" aria-labelledby="saved-h">
+      <div className="hero-main">
+        <h2 id="saved-h" className="hero-label">Time saved</h2>
+        {s.total ? <p className="hero-value">{value} <span>{unit}</span></p> : <p className="hero-empty">Nothing yet. Fill your first application to start the count.</p>}
+        {s.total > 0 && <ul className="hero-facts"><li><b>{span(s.thisWeek)}</b> this week</li><li><b>{s.apps}</b> application{s.apps === 1 ? '' : 's'}</li><li><b>{span(s.total / s.apps)}</b> each</li></ul>}
+        <p className="hero-note">An estimate, from what JobDemon filled in for you.</p>
+      </div>
+      {s.total > 0 && <div className="hero-chart" role="img" aria-label={`Hours saved per week, last 8 weeks. This week: ${span(s.thisWeek)}.`}>
+        <ResponsiveContainer width="100%" height={132}>
+          <BarChart data={s.weeks} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+            <XAxis dataKey="week" tickFormatter={short} tickLine={false} axisLine={false} minTickGap={24} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+            <Tooltip content={<Tip fmt={(w) => `Week of ${short(w)}`} />} cursor={{ fill: 'var(--rule)', fillOpacity: 0.4 }} />
+            <Bar isAnimationActive={false} dataKey="hours" name="Hours" fill="var(--ok)" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>}
+    </section>
+  );
+}
+
 function Charts({ s }: { s: Stats }) {
   const last7 = s.daily.slice(-7).reduce((n, d) => n + d.added, 0);
   return (
+    <>
+    <Saved s={s.saved} />
     <div className="charts">
       <Card title="Submitted" value={s.totals.submitted} sub={`${s.totals.thisWeek} this week`}>
         <Heatmap days={s.heatmap} />
@@ -136,6 +177,7 @@ function Charts({ s }: { s: Stats }) {
         </ResponsiveContainer>
       </Card>
     </div>
+    </>
   );
 }
 

@@ -2,7 +2,7 @@
 // Add a field or a screening question in Setup and it appears here with nothing else to touch.
 import type { BankEntry, Profile } from './profile.js';
 import { FIELD_GROUPS, PROFILE_HINTS } from './profileForm.js';
-import { DEFAULT_GUIDELINES } from './guidelines.js';
+import { ALWAYS_GUIDELINES, DEFAULT_GUIDELINES } from './guidelines.js';
 import type { Context, Fact, FileSlot, JobCtx } from './types.js';
 
 const FIELD_LABELS = Object.fromEntries(FIELD_GROUPS.flatMap((g) => g.fields.map((f) => [f.key, f.label])));
@@ -40,6 +40,6 @@ export function buildContext(profile: Profile, profileVersion: string, bank: Ban
   if (has.transcript) files.push({ key: 'transcript', label: 'Academic transcript (PDF)', stored: true });
   files.push({ key: 'cover_letter', label: 'Cover letter (written for this job)', stored: false });
 
-  const guidelines = profile.guidelines?.length ? profile.guidelines : DEFAULT_GUIDELINES;
+  const guidelines = [...(profile.guidelines?.length ? profile.guidelines : DEFAULT_GUIDELINES), ...ALWAYS_GUIDELINES];
   return { facts, files, guidelines, portal, job, profile, profileVersion };
 }

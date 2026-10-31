@@ -68,13 +68,13 @@ function typeInto(el: HTMLElement, value: string) {
 }
 const leave = (el: HTMLElement) => { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur(); };
 
-// A list's own "nothing here" line, drawn as an option.
-const NO_RESULTS = /^(no (items|results|matches|options)( found)?|nothing found)\.?$/i;
+// Lines drawn as options that aren't choices: "nothing here" messages, and the prompt ("Select One", "Please select…").
+const NOT_A_CHOICE = /^(no (items|results|matches|options)( found)?|nothing found)\.?$|^(select|choose|pick)( one| an? \w+)?\W*$|^please (select|choose)\b|^[-–—\s]*make a selection/i;
 
 /** Options showing right now (outside the field, or inside it but not already chosen). */
 function visibleOptions(f: Field): HTMLElement[] {
   // Lists may be drawn inside a web component: look through them too.
-  const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true') && !NO_RESULTS.test(optLabel(n)));
+  const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true') && !NOT_A_CHOICE.test(optLabel(n)));
   return opts.filter((n) => !opts.some((m) => m !== n && m.contains(n)));
 }
 const optLabel = (n: HTMLElement) => (n.getAttribute('data-automation-label') || n.innerText || n.textContent || '').trim();
@@ -185,7 +185,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   const pickFrom = async (list: HTMLElement[]) => {
     const labels = list.map(optLabel);
     const a = await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });
-    log({ type: 'list', q: prompt(f), offered: labels.slice(0, 40), total: labels.length, picked: a.kind === 'pick' ? labels[a.indexes[0]] : `none (${a.because})` });
+    log({ type: 'list', q: prompt(f), offered: labels.slice(0, 40), total: labels.length, picked: a.kind === 'pick' ? labels[a.indexes[0]] : `none (${a.because})`, confidence: a.kind === 'pick' ? a.confidence : undefined });
     if (a.kind !== 'pick') return a;
     press(list[a.indexes[0]]);
     chosen.push(labels[a.indexes[0]]);
@@ -228,8 +228,12 @@ async function pick(f: Field, d: Deps): Promise<Result> {
       if (!target) break;
       typeInto(target, term);
       await sleep(700);
-      if (!fresh().length) { key('Enter', target); await sleep(1000); }
-      const list = fresh();
+      // Some lists stay open after a pick, still showing it: those aren't results for this term.
+      const results = () => fresh().filter((o) => !chosen.includes(optLabel(o)));
+      // Some lists stay closed while you type: the down arrow opens them on what was typed. Results can take a moment.
+      for (let i = 0; i < 4 && !results().length; i++) { if (!i) key('ArrowDown', target); await sleep(500); }
+      if (!results().length) { key('Enter', target); await sleep(1000); }
+      const list = results();
       if (!list.length) continue;
       const r = await pickFrom(list);
       // A single-choice list is done after one pick; a multi-pick list (skills) keeps a box to type the next term.
@@ -239,6 +243,8 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   }
   key('Escape');
   await sleep(150);
+  // Text typed to search isn't a choice: nothing was picked, so don't leave it looking answered.
+  if (!chosen.length && f.editable && (el as HTMLInputElement).value && (el as HTMLInputElement).value !== was) typeInto(el, '');
   const now = shows(f);
   if (!now) return notDone(q, unanswered(q, chosen.length ? `picked "${chosen.join(' > ')}" but the field doesn't show it` : 'nothing in the list matched'));
   return filled(`chose "${chosen.join(' > ')}"`, now);

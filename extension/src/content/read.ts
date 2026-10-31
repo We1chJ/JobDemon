@@ -26,7 +26,7 @@ export interface Field {
   description?: string; // other text shown with the question (instructions, or the real question under a heading)
 }
 export interface Button { el: HTMLElement; text: string; autoId: string; footer: boolean }
-export interface Section { add: HTMLElement; heading: string; entries: number }
+export interface Section { add: HTMLElement; heading: string; entries: number; rows: { name: string; del: HTMLElement }[] }
 export interface Step {
   name: string;
   progress?: { at: number; of: number };
@@ -239,7 +239,16 @@ function readOnce(): Step {
     // number of entries, and not part of the name (it changes as entries are added).
     const count = textOf(title).match(/\((\d+)\)/);
     const name = noStar(textOf(title).replace(/\(\d+\)/, '').replace(/\brequired\.?$/i, ''));
-    return { add: b, heading: name || (numbered[0] ? textOf(numbered[0]).replace(/\s\d+$/, '') : `Section ${i + 1}`), entries: Math.max(numbered.length, count ? +count[1] : 0), box, numbered };
+    // Each numbered entry's own Delete button: the nearest one that isn't also around another entry.
+    const rows = numbered.flatMap((h) => {
+      let a: HTMLElement | null = up(h);
+      for (let k = 0; a && a !== box && !numbered.some((n) => n !== h && within(a!, n)); k++, a = up(a)) {
+        const del = all('button, [role=button]', a).find((x) => shown(x) && /^(delete|remove)\b/i.test(clean(inner(x)) || x.getAttribute('aria-label') || ''));
+        if (del) return [{ name: textOf(h), del }];
+      }
+      return [];
+    });
+    return { add: b, heading: name || (numbered[0] ? textOf(numbered[0]).replace(/\s\d+$/, '') : `Section ${i + 1}`), entries: Math.max(numbered.length, count ? +count[1] : 0), rows, box, numbered };
   });
   const labelsOf = (el: Element) => all('label, legend', el).map((l) => noStar(inner(l))).filter((t) => t && !GENERIC_FILE.test(t)).join('|');
   // Rows of a repeating section with no numbered headings (e.g. one row per school): the same set of questions
@@ -379,7 +388,7 @@ function readOnce(): Step {
   const pw = all<HTMLInputElement>('input[type=password]').find((p) => { const r = p.getBoundingClientRect(); return r.width > 30 && r.height > 8 && shown(p); });
   // A section's entries: its numbered headings, or (sites without them) the rows its questions sit in.
   const entries = (sec: (typeof sections)[number]) => Math.max(sec.entries, new Set(fields.filter((f) => f.entry && within(sec.box, f.box)).map((f) => f.entry)).size);
-  return { name: name.slice(0, 80), progress, signIn: !!pw, fields, buttons, sections: sections.map((sec) => ({ add: sec.add, heading: sec.heading, entries: entries(sec) })), errors: [...new Set(alerts)].slice(0, 5) };
+  return { name: name.slice(0, 80), progress, signIn: !!pw, fields, buttons, sections: sections.map((sec) => ({ add: sec.add, heading: sec.heading, entries: entries(sec), rows: sec.rows })), errors: [...new Set(alerts)].slice(0, 5) };
 }
 
 export function readStep(): Step {

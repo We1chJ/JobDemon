@@ -13,6 +13,8 @@ export const DEFAULT_SETTINGS: Settings = { typesafeKey: '', openaiKey: '', open
 export type FileKey = 'resume' | 'transcript';
 export interface StoredFile { name: string; type: string; size: number; data: string } // data: base64
 
+/** What a fill did for you, counted for the Time saved card. */
+export type Action = 'typed' | 'picked' | 'ticked' | 'uploaded' | 'pages' | 'written' | 'letters';
 export type HistoryStatus = 'in_progress' | 'filled' | 'needs_you' | 'applied' | 'removed';
 export interface HistoryItem {
   key: string; // normalized URL
@@ -26,6 +28,7 @@ export interface HistoryItem {
   updatedAt: string;
   submittedAt?: string;
   letter?: string; // the cover letter written for it
+  actions?: Partial<Record<Action, number>>; // none on applications from before these were counted
 }
 
 /** Everything except your API keys, as one file: moves your data between computers (and from the old app). */
@@ -85,7 +88,7 @@ export async function profileVersion() {
 export function jobKey(url: string) {
   try {
     const u = new URL(url);
-    for (const p of [...u.searchParams.keys()]) if (/^(utm_|gh_src|source|ref|_gl|lever-|trk)/i.test(p)) u.searchParams.delete(p);
+    for (const p of [...u.searchParams.keys()]) if (/^(utm_|gh_src|source|ref|_gl|lever-|trk|fbclid|gclid)/i.test(p)) u.searchParams.delete(p);
     u.hash = '';
     return u.toString().replace(/\/$/, '');
   } catch { return url; }

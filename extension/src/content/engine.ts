@@ -5,7 +5,7 @@
 import { ask, type FillReport, type Look, type Run } from '../shared/msg.js';
 import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
-import { store } from '../shared/store.js';
+import { store, type Action } from '../shared/store.js';
 import { inside, readJob, readStep, type Field, type Step } from './read.js';
 import { trackSubmit } from './submit.js';
 import { WIDGETS, key, press, sleep } from './widgets.js';
@@ -26,6 +26,11 @@ const START = [
 const NEXT = { id: /pageFooterNextButton|bottom-navigation-next-button/i, text: /^(save (and|&) continue|continue|next( step| page)?)$/i };
 const SUBMIT = /^(submit( (my )?application)?|send( application)?|finish|complete)$/i;
 // Buttons that send you to another account (apply with LinkedIn...): never the way into the form.
+/** What filling this field saved you, for the Time saved card (an unticked box saved nothing). */
+const actionOf = (f: Field, detail: string, value: string): Action | null =>
+  /^(uploaded )?cover letter/.test(detail) ? 'letters' : /^written answer/.test(detail) ? 'written' : f.kind === 'file' ? 'uploaded'
+    : f.kind === 'text' || f.kind === 'textarea' || f.kind === 'date' ? 'typed' : f.kind === 'checkbox' || f.kind === 'checkgroup' ? (value ? 'ticked' : null) : 'picked';
+const COUNTED = /experience|employment|work|education/i;
 const ELSEWHERE = /apply with|sign (in|up) with|log ?in with|continue with|import (from|my)|quick apply|use my (profile)/i;
 // The login and password of the account a form creates: yours to choose.
 const ACCOUNT = /^(log ?in|user ?(name|id)|password)\b/i;
@@ -52,7 +57,7 @@ export const setStopping = (on: boolean) => { stopping = on; };
 
 /** Fill this frame's page. `retry` also re-answers fields the page flagged with an error. */
 export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
-  const tried = new Set<string>(), decided = new Set<string>(), answers = new Map<string, string>();
+  const tried = new Set<string>(), again = new Set<string>(), decided = new Set<string>(), answers = new Map<string, string>();
   const needs: string[] = [];
   let filled = 0, step: Step = readStep();
   const worth = top || step.fields.length > 0; // embedded frames with no questions (captchas, ads) stay out of the log
@@ -71,6 +76,16 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       for (let i = section.entries; i < want && !stopping; i++) {
         const add = readStep().sections.find((s) => s.heading === section.heading)?.add ?? section.add;
         press(add);
+        await sleep(700);
+      }
+      // More jobs or schools than Setup has (a site's resume reader can turn a project into a job): remove the
+      // extras, half-empty ones first, then from the bottom. Other sections' counts are only the AI's estimate.
+      for (let i = section.entries; a.kind === 'pick' && want > 0 && i > want && COUNTED.test(section.heading) && !stopping; i--) {
+        const now = readStep(), rows = [...(now.sections.find((s) => s.heading === section.heading)?.rows ?? [])].reverse();
+        const row = rows.find((r) => now.fields.some((f) => f.entry === r.name && f.required && !f.value)) ?? rows[0];
+        if (!row) break;
+        log({ type: 'removed an extra entry', section: section.heading, entry: row.name });
+        press(row.del);
         await sleep(700);
       }
       continue;
@@ -94,13 +109,19 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       const r = await handler(f, { previous: above ? { prompt: above.label, answer: answers.get(above.key) ?? above.value } : undefined, feedback: retry ? f.error : undefined }, retry && !!f.error);
       console.info(`JobDemon: ${r.status} "${label}": ${r.detail}`);
       log({ type: 'field', q: label, kind: f.kind, status: r.status, detail: r.detail });
-      if (r.status === 'filled') { filled++; answers.set(f.key, r.value); }
+      if (r.status === 'filled') {
+        filled++; answers.set(f.key, r.value);
+        const action = actionOf(f, r.detail, r.value);
+        if (action) await ask({ t: 'did', action }).catch(() => {});
+      }
       if (r.status === 'escalate') needs.push(label);
     } catch (err) {
       key('Escape');
       console.warn('JobDemon:', label, (err as Error).message);
       log({ type: 'field', q: label, kind: f.kind, status: 'error', detail: (err as Error).message });
       if (/API key|not responding/i.test((err as Error).message)) throw err;
+      // The AI is busy for a moment ("529 ... try again later"): give this field one more go before leaving it for you.
+      if (/\b(429|5\d\d)\b|try again/i.test((err as Error).message) && !again.has(f.key)) { again.add(f.key); tried.delete(f.key); await sleep(5000); continue; }
       if (f.required) needs.push(label);
     }
   }
@@ -299,6 +320,7 @@ export async function continueRun(say: Say, resume = false) {
     await save(run);
     if (!(await stillOn())) return halted();
     say(`Next: "${next.text}"`);
+    if (!tries) await ask({ t: 'did', action: 'pages' }).catch(() => {});
     log({ type: 'click', button: next.text, why: 'next page', attempt: tries + 1, in: next.frame === undefined ? 'page' : 'embedded form' });
     await click(next);
     await waitForChange(step);

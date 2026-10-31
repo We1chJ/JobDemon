@@ -13,13 +13,15 @@ const CSS = `
 :host{all:initial}
 *{box-sizing:border-box}
 .w{--bg:#fff;--fg:#18181b;--muted:#71717a;--line:#e4e4e7;--soft:#f4f4f5;--warn:#b45309;--pri:#18181b;--on-pri:#fff;
-  font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--fg);width:max-content;max-width:calc(100vw - 32px)}
+  font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--fg);width:300px;max-width:calc(100vw - 32px)}
 @media (prefers-color-scheme:dark){.w{--bg:#18181b;--fg:#f4f4f5;--muted:#a1a1aa;--line:#3f3f46;--soft:#27272a;--warn:#f59e0b;--pri:#f4f4f5;--on-pri:#18181b}}
 .card{background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgb(0 0 0/.14),0 1px 3px rgb(0 0 0/.08);position:relative}
 .bar{display:flex;align-items:center;gap:6px;padding:6px;cursor:grab;user-select:none;touch-action:none}
 .bar:active{cursor:grabbing}
 .logo{width:30px;height:30px;border:0;background:none;padding:2px;border-radius:8px;cursor:inherit;display:grid;place-items:center}
 .logo img{width:20px;height:23px;display:block;pointer-events:none}
+.w.mini{width:max-content}
+.bar > button{flex:none}.bar > .pri{flex:1;min-width:0}
 .mini .logo{cursor:pointer}.mini .logo:hover{background:var(--soft)}
 .mini .card{border-radius:12px 0 0 12px;border-right:0;opacity:.8;transition:opacity .15s}.mini .card:hover{opacity:1}
 .mini.left .card{border-radius:0 12px 12px 0;border-right:1px solid var(--line);border-left:0}
@@ -30,8 +32,8 @@ button.b.pri{background:var(--pri);border-color:var(--pri);color:var(--on-pri)}
 button.b.pri:hover{opacity:.9}
 button.b:disabled{opacity:.45;cursor:default}
 button.more{width:30px;padding:0;font-size:16px;letter-spacing:1px;border-color:transparent;color:var(--muted)}
-.sub{border-top:1px solid var(--line);padding:8px 10px 9px;max-width:330px;display:grid;gap:6px}
-.t{display:flex;gap:7px;align-items:baseline}
+.sub{border-top:1px solid var(--line);padding:8px 10px 9px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.t{display:flex;gap:7px;align-items:baseline;overflow-wrap:anywhere}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none;transform:translateY(-1px)}
 .busy .dot{background:#7c3aed;animation:p 1s ease-in-out infinite}
 @keyframes p{50%{opacity:.25}}

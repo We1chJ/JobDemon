@@ -1,8 +1,7 @@
 // Cover letter: paste a job posting and get a letter written from your Setup, nothing invented.
-import { jobInfo, letterForPosting } from '../background/ai.js';
 import { html } from '../shared/html.js';
+import { ask } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
-import { store } from '../shared/store.js';
 import { download, render } from './ui.js';
 
 function draw(v: { company?: string; jd?: string; letter?: string; note?: string; error?: string; busy?: boolean } = {}) {
@@ -35,12 +34,9 @@ async function generate(raw: string) {
   if (!jd) return draw({ error: 'Paste a job description first.' });
   draw({ jd, busy: true });
   try {
-    const s = await store.settings();
-    // The company and role come from the posting itself.
-    const job = await jobInfo(s, jd);
-    if (!job.company || !job.role) return draw({ jd, error: `Couldn't find the ${!job.company ? 'company name' : 'job title'} in that text. Paste the whole posting, including the company and job title.` });
-    const r = await letterForPosting(s, { company: job.company, role: job.role, jd }, await store.profile());
-    draw({ jd, company: job.company, letter: r.text, note: `${job.role} at ${job.company} · ${r.ok ? `relevance ${r.score.toFixed(1)}/4` : `relevance only ${r.score.toFixed(1)}/4 after 3 drafts: check it closely`}` });
+    const r = await ask<{ company: string; role: string; text?: string; ok?: boolean; score?: number }>({ t: 'letter:posting', jd });
+    if (r.text === undefined) return draw({ jd, error: `Couldn't find the ${!r.company ? 'company name' : 'job title'} in that text. Paste the whole posting, including the company and job title.` });
+    draw({ jd, company: r.company, letter: r.text, note: `${r.role} at ${r.company} · ${r.ok ? `relevance ${r.score!.toFixed(1)}/4` : `relevance only ${r.score!.toFixed(1)}/4 after 3 drafts: check it closely`}` });
   } catch (e) {
     draw({ jd, error: `Error: couldn't write the letter because ${(e as Error).message.split('\n')[0]}` });
   }

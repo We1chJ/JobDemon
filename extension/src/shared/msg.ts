@@ -1,5 +1,5 @@
 // Messages between the pages, the content scripts and the background worker. Every reply is {ok, v} or {ok:false, error}.
-import type { HistoryItem } from './store.js';
+import type { Action, HistoryItem } from './store.js';
 import type { Answer, JobCtx, Question } from './types.js';
 
 /** What a frame did when asked to fill its page. */
@@ -19,6 +19,8 @@ export type ToBackground =
   | { t: 'answer'; q: Question }
   | { t: 'file'; key: 'resume' | 'transcript' | 'cover_letter' }
   | { t: 'letter' }
+  | { t: 'did'; action: Action }
+  | { t: 'letter:posting'; jd: string }
   | { t: 'history'; patch: Partial<HistoryItem> }
   | { t: 'run:get' }
   | { t: 'run:set'; run: Run | null }
