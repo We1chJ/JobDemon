@@ -38,7 +38,8 @@ export async function answerQuestion(q: Question, ctx: Context, brain: Brain): P
   const s = await brain.source(q, ctx);
   // A required question can't stay blank: it's left for you instead.
   if (s.blank) return q.required ? unanswered(q, 'the AI would leave it blank, but the form requires an answer') : { kind: 'skip', because: 'left blank on purpose' };
-  if (s.fact) return { kind: 'text', value: s.fact.value, because: s.fact.key };
+  // Phone numbers go in as digits only: no spaces, brackets, dashes or plus sign.
+  if (s.fact) return { kind: 'text', value: s.fact.key === 'phone' ? s.fact.value.replace(/\D/g, '') : s.fact.value, because: s.fact.key };
   if (s.write) {
     const w = await brain.write(s.write, q.prompt, ctx);
     return { kind: 'text', value: w.text, file: w.file, because: s.write === 'cover_letter' ? 'cover letter' : 'written answer' };

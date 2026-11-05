@@ -87,6 +87,7 @@ try {
   check('job 1 is filled and stops at the submit button', a1?.status === 'filled' && /Submit Application/.test(await status(p1)), `${a1?.status}: ${await status(p1)}`);
   check('the fill counts what it did, for the Time saved card', (a1?.actions?.typed ?? 0) >= 4 && (a1?.actions?.picked ?? 0) >= 2 && (a1?.actions?.uploaded ?? 0) >= 1, JSON.stringify(a1?.actions));
   check('company/role read off page', a1?.company === 'Mockco' && a1?.role === 'Backend Engineer', `${a1?.company} / ${a1?.role}`);
+  check('phone number typed as digits only', (await val(p1, '#phone')) === '15550100', await val(p1, '#phone'));
   check('structured fields mapped from profile', (await val(p1, '#first_name')) === 'Jane' && (await val(p1, '#email')) === 'jane@example.com' && (await val(p1, '#linkedin')) === 'https://www.linkedin.com/in/janedoe');
   check('answer bank used for select + radio', (await selected(p1, '#auth')) === 'Yes' && (await p1.locator('input[name=sponsor][value=no]').isChecked()));
   check('transcript attached to the transcript field', (await fileName(p1, '#transcript')) === 'transcript.pdf');
