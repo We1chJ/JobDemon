@@ -205,16 +205,17 @@ const save = (run: Run | null) => (stopping && run ? Promise.resolve() : ask({ t
 // The same step, by its questions' wording (internal ids can change every time a page redraws).
 const stepTag = (s: Step) => `${location.pathname}#${s.name}#${s.progress?.at ?? ''}#${[...new Set(s.fields.map((f) => (f.entry ? `${f.entry} > ${f.label}` : f.label)))].sort().join(',')}`;
 
-/** After a click: wait until the page (or its embedded form) moves on or shows an error (up to 20 s). A full page
- * load ends this script. */
+/** After a click, or while a page is still drawing: wait until the page (or its embedded form) changes, its buttons
+ * change, or it shows an error. false after 20 s with nothing new. A full page load ends this script. */
 async function waitForChange(before: Look) {
-  const url = location.href, tag = where(before);
+  const url = location.href, tag = where(before), buttons = before.buttons.map((b) => b.text).join('|');
   for (let waited = 0; waited < 20000; waited += 1000) {
     await sleep(1000);
     const now = await view();
-    if (location.href !== url || where(now) !== tag || now.signIn || now.errors.length || now.flagged.length) return;
-    if (!(await ask<Run | null>({ t: 'run:get' }))?.active) return; // stopped, or moved to a new tab
+    if (location.href !== url || where(now) !== tag || now.buttons.map((b) => b.text).join('|') !== buttons || now.signIn || now.errors.length || now.flagged.length) return true;
+    if (!(await ask<Run | null>({ t: 'run:get' }))?.active) return true; // stopped, or moved to a new tab
   }
+  return false;
 }
 
 /** Fill page: from the page this tab shows, through the next pages, to Submit. */
@@ -289,17 +290,21 @@ export async function continueRun(say: Say, resume = false) {
 
     // Page done: Save and Continue, or stop at Submit.
     const next = find(ways, NEXT);
+    const submit = step.buttons.find((b) => SUBMIT.test(b.text));
     if (!next || SUBMIT.test(next.text)) {
-      // Nothing to click yet: the page may still be drawing after the last click.
-      if (!next && !report.fields && Date.now() - run.lastClickAt < 20000) { await sleep(1500); continue; }
-      const submit = step.buttons.find((b) => SUBMIT.test(b.text));
+      // Neither Next nor Submit: the page may still be drawing (questions before buttons, a slow save, a pop-up).
+      // Wait while it keeps changing; only 20 s with nothing new ends the run, and that isn't "Done".
+      if (!submit) {
+        if (await waitForChange(step)) continue;
+        return stop("Filled what's here, but found no Next or Submit button. Check the page, then submit it or press Fill page to carry on.");
+      }
       // Auto-submit (your switch on the bar): only a complete form, with nothing left for you and no messages on it.
-      if (submit && (await store.autoSubmit()) && !report.needs.length && !step.errors.length && !step.flagged.length) {
+      if ((await store.autoSubmit()) && !report.needs.length && !step.errors.length && !step.flagged.length) {
         log({ type: 'auto-submit', button: submit.text });
         await click(submit, true);
         return stop(`Auto-submit: clicked "${submit.text}". Checking it went through…`);
       }
-      return stop(submit ? `Done. Check it, then click "${submit.text}".` : 'Done. Check the page, then submit it.');
+      return stop(`Done. Check it, then click "${submit.text}".`);
     }
     // Tries: 0 = first click; 1 = the page refused, answer its flagged fields again; 2 = second click; 3 = give up.
     const tag = where(step);

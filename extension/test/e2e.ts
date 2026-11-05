@@ -391,6 +391,11 @@ try {
   check('a form in a frame counts when the whole page moves to its thank-you page', (await item(u(28)))?.status === 'applied', (await item(u(28)))?.status);
   check('other wording counts: "Submit now ›"', (await submits(29, 8)) === 'applied');
   check('"Apply" counts on a filled form', (await submits(30, 8)) === 'applied');
+  const p33 = await run(u(33));
+  check('a page whose Submit button shows after its questions is filled, not called done early', /Submit Application/.test(await status(p33)) && (await val(p33, '#why33')).length > 20, await status(p33));
+  const p34 = await run(u(34));
+  check('a page with no Next or Submit is not called done', /no Next or Submit/.test(await status(p34)) && (await val(p34, '#fn')) !== '', await status(p34));
+  await p33.close(); await p34.close();
   const p31 = await open(u(31));
   await p31.locator('#go').click();
   await sleep(4000);
