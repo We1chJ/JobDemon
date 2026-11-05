@@ -78,6 +78,21 @@ function visibleOptions(f: Field): HTMLElement[] {
   const opts = everywhere(OPTION).filter((n) => shown(n) && !(inside(f.box, n) && n.getAttribute('aria-selected') === 'true') && !NOT_A_CHOICE.test(optLabel(n)));
   return opts.filter((n) => !opts.some((m) => m !== n && m.contains(n)));
 }
+// The list an option sits in. A list just opened is the one with the most options showing; strays (a choice shown in
+// another field, drawn while the page was still loading) aren't in it.
+const LISTS = '[role=listbox], [role=menu], [role=tree], [role=grid], [data-automation-id="activeListContainer"]';
+function oneList(opts: HTMLElement[]) {
+  const groups = new Map<Element, HTMLElement[]>();
+  for (const o of opts) { const g = o.closest(LISTS) ?? o.parentElement ?? o; groups.set(g, [...(groups.get(g) ?? []), o]); }
+  return [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+}
+/** What a real click on the middle of an option lands on: sites can listen on an inner part of the row. */
+function hit(el: HTMLElement) {
+  el.scrollIntoView({ block: 'center', inline: 'nearest' });
+  const r = el.getBoundingClientRect();
+  const h = (el.getRootNode() as Document | ShadowRoot).elementFromPoint?.(r.left + r.width / 2, r.top + r.height / 2) as HTMLElement | null;
+  return h && el.contains(h) ? h : el;
+}
 const optLabel = (n: HTMLElement) => (n.getAttribute('data-automation-label') || n.innerText || n.textContent || '').trim();
 
 /** What the field shows now, read the same way the page was read. f follows the page's current elements. */
@@ -176,7 +191,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   key('Escape');
   await sleep(150);
   const stale = new Set(visibleOptions(f));
-  const fresh = () => visibleOptions(f).filter((o) => !stale.has(o));
+  const fresh = () => oneList(visibleOptions(f).filter((o) => !stale.has(o)));
   press(el);
   if (el.tagName === 'INPUT') key('ArrowDown', el);
   // Lists often load their options a moment after opening: give them up to 3 seconds to appear.
@@ -191,7 +206,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
     const a: Answer = first ? { kind: 'pick', indexes: [0], because: 'the first option' } : await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });
     log({ type: 'list', q: prompt(f), offered: labels.slice(0, 40), total: labels.length, picked: a.kind === 'pick' ? labels[a.indexes[0]] : `none (${a.because})`, confidence: a.kind === 'pick' ? a.confidence : undefined });
     if (a.kind !== 'pick') return a;
-    press(list[a.indexes[0]]);
+    press(hit(list[a.indexes[0]]));
     chosen.push(labels[a.indexes[0]]);
     await sleep(600);
     return a;

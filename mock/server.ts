@@ -116,10 +116,12 @@ const closePop = () => { if (popup) { popup.remove(); popup = null; } };
 const openPop = (anchor, items, onPick, attr = 'data-automation-id="promptOption"', role = '') => {
   closePop(); popup = document.createElement(role ? 'ul' : 'div'); popup.className = 'wd-pop';
   if (role) popup.setAttribute('role', 'listbox'); else popup.setAttribute('data-automation-id', 'activeListContainer');
-  popup.innerHTML = items.map((t) => role ? '<li role="option">' + t + '</li>' : '<div ' + attr + ' data-automation-label="' + t + '">' + t + '</div>').join('');
+  // 32, like Wells Fargo: each row is a wrapper, and only the part inside it listens for the click.
+  const row = (t) => '<div ' + attr + ' data-automation-label="' + t + '">' + t + '</div>';
+  popup.innerHTML = items.map((t) => role ? '<li role="option">' + t + '</li>' : ${job === '32'} ? '<div data-automation-id="menuItem" role="option">' + row(t) + '</div>' : row(t)).join('');
   const r = anchor.getBoundingClientRect(); popup.style.left = (r.left + scrollX) + 'px'; popup.style.top = (r.bottom + scrollY) + 'px';
   document.body.appendChild(popup);
-  [...popup.children].forEach((o) => o.onclick = () => onPick(o.textContent));
+  [...popup.children].map((o) => (role ? o : o.querySelector('[data-automation-label]') ?? o)).forEach((o) => o.onclick = () => onPick(o.textContent));
 };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
 // Button dropdowns.
@@ -134,7 +136,9 @@ const codes = ['United States of America (+1)', 'United States Minor Outlying Is
 const pill = (box, t) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = t; box.insertBefore(p, box.firstChild); $('input', box).value = ''; closePop(); };
 $$('.wd-search').forEach((box) => {
   const input = $('input', box), which = box.dataset.search;
-  const open = () => { input.focus(); if (which === 'source') openPop(box, Object.keys(tree), (cat) => setTimeout(() => openPop(box, tree[cat], (leaf) => pill(box, leaf)), ${job === '32' ? 1500 : 0}));
+  // 32: another field's choice is drawn the moment the list opens (the page still loading).
+  const stray = () => { if (${job === '32'} && !$('#stray')) $('[data-search=phoneCode]').insertAdjacentHTML('beforeend', '<div id="stray" data-automation-id="promptOption">United States of America (+1)</div>'); };
+  const open = () => { input.focus(); if (which === 'source') setTimeout(stray, 200); if (which === 'source') openPop(box, Object.keys(tree), (cat) => setTimeout(() => openPop(box, tree[cat], (leaf) => pill(box, leaf)), ${job === '32' ? 1500 : 0}));
     else if (which === 'skills') openPop(box, ['Leadership', 'Communication'], (t) => pill(box, t)); else closePop(); };
   $('.cover', box).onclick = open;
   input.onclick = open;
