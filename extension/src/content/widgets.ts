@@ -183,6 +183,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   let options = fresh();
   for (let i = 0; i < 6 && !options.length; i++) { await sleep(500); options = fresh(); }
   const chosen: string[] = [];
+  let typedIn: HTMLElement | undefined; // the box typed into to search the list
   // Workday's "How did you hear about us?": its first option, down each sub-list. Nothing to choose.
   const first = portalName(location.hostname) === 'Workday' && HEARD.test(f.label);
   const pickFrom = async (list: HTMLElement[]) => {
@@ -201,12 +202,17 @@ async function pick(f: Field, d: Deps): Promise<Result> {
     const a = await pickFrom(options);
     if (a.kind !== 'pick') {
       if (level > 0) { key('Escape'); return notDone(q, a); }
+      // A dropdown you can't type in shows its whole list: nothing in it fits, so there's nothing to search for.
+      if (!f.editable) { key('Escape'); return notDone(q, a); }
       browse = false; // nothing in the first list fits: search for the answer instead
       break;
     }
     if (shows(f)) break;
     const before = options.map(optLabel).join('|');
     options = fresh(); // a sub-list, or nothing once the pick is made
+    // Some sites load a sub-list a moment after the click: give it up to 3 seconds.
+    for (let i = 0; i < 6 && !shows(f) && (!options.length || options.map(optLabel).join('|') === before); i++) { await sleep(500); options = fresh(); }
+    if (shows(f)) break;
     // The same list again: a list that stays open after a pick (select several) shows the choice once it closes;
     // otherwise the pick didn't take. Either way, stop rather than repeat it.
     if (options.map(optLabel).join('|') === before) {
@@ -230,6 +236,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
       const target = box();
       if (!target) break;
       typeInto(target, term);
+      typedIn = target;
       await sleep(700);
       // Some lists stay open after a pick, still showing it: those aren't results for this term.
       const results = () => fresh().filter((o) => !chosen.includes(optLabel(o)));
@@ -246,8 +253,8 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   }
   key('Escape');
   await sleep(150);
-  // Text typed to search isn't a choice: nothing was picked, so don't leave it looking answered.
-  if (!chosen.length && f.editable && (el as HTMLInputElement).value && (el as HTMLInputElement).value !== was) typeInto(el, '');
+  // Text typed to search isn't a choice: nothing was picked, so don't leave it looking answered (or rejected).
+  if (!chosen.length && typedIn && (typedIn as HTMLInputElement).value && (typedIn as HTMLInputElement).value !== was) typeInto(typedIn, '');
   const now = shows(f);
   if (!now) return notDone(q, unanswered(q, chosen.length ? `picked "${chosen.join(' > ')}" but the field doesn't show it` : 'nothing in the list matched'));
   return filled(`chose "${chosen.join(' > ')}"`, now);

@@ -55,11 +55,20 @@ export async function requestStop() {
 /** A frame was told to stop (or, with false, that a new fill is starting). */
 export const setStopping = (on: boolean) => { stopping = on; };
 
+// Fields already answered or left blank on this page (key: whether it's required). They aren't asked again on the
+// next pass over the same page, unless the page flags them with an error.
+const settled = { page: '', keys: new Map<string, boolean>() };
+const pageOf = (s: Step) => `${location.pathname}#${s.name}#${s.progress?.at ?? ''}`;
+
 /** Fill this frame's page. `retry` also re-answers fields the page flagged with an error. */
 export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
   const tried = new Set<string>(), again = new Set<string>(), decided = new Set<string>(), answers = new Map<string, string>();
   const needs: string[] = [];
-  let filled = 0, step: Step = readStep();
+  let filled = 0, step: Step = readStep(), stuck: string | undefined;
+  if (pageOf(step) !== settled.page) settled.keys.clear();
+  settled.page = pageOf(step);
+  // Workday goes strictly in order: a required question it can't answer stops the fill there.
+  const inOrder = portalName() === 'Workday';
   const worth = top || step.fields.length > 0; // embedded frames with no questions (captchas, ads) stay out of the log
   if (worth) snapshot(retry ? 'before filling again (the page flagged fields)' : 'before filling');
   for (let guard = 0; guard < 300 && !stopping; guard++) {
@@ -91,7 +100,7 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       continue;
     }
     // The next empty field. Fields already filled (by the site from your resume, or by you) are left alone.
-    const f = step.fields.find((x) => !tried.has(x.key) && (!x.value || (retry && !!x.error)));
+    const f = step.fields.find((x) => !tried.has(x.key) && ((retry && !!x.error) || (!x.value && !settled.keys.has(x.key))));
     if (!f) break;
     tried.add(f.key);
     const label = f.entry ? `${f.entry} > ${f.label}` : f.label;
@@ -114,7 +123,9 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
         const action = actionOf(f, r.detail, r.value);
         if (action) await ask({ t: 'did', action }).catch(() => {});
       }
+      if (r.status !== 'filled') settled.keys.set(f.key, !!f.required);
       if (r.status === 'escalate') needs.push(label);
+      if (r.status === 'escalate' && f.required && inOrder) { stuck = r.detail; break; }
     } catch (err) {
       key('Escape');
       console.warn('JobDemon:', label, (err as Error).message);
@@ -122,11 +133,15 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       if (/API key|not responding/i.test((err as Error).message)) throw err;
       // The AI is busy for a moment ("529 ... try again later"): give this field one more go before leaving it for you.
       if (/\b(429|5\d\d)\b|try again/i.test((err as Error).message) && !again.has(f.key)) { again.add(f.key); tried.delete(f.key); await sleep(5000); continue; }
+      settled.keys.set(f.key, !!f.required);
       if (f.required) needs.push(label);
+      if (f.required && inOrder) { stuck = `Required field "${label}": ${(err as Error).message}`; break; }
     }
   }
-  if (worth) snapshot(stopping ? 'stopped' : 'after filling');
-  return { fields: readStep().fields.length, filled, needs };
+  if (worth) snapshot(stopping ? 'stopped' : stuck ? 'stuck' : 'after filling');
+  // Required questions left blank on an earlier pass are still yours.
+  for (const x of readStep().fields) if (settled.keys.get(x.key) && !x.value) { const l = x.entry ? `${x.entry} > ${x.label}` : x.label; if (!needs.includes(l)) needs.push(l); }
+  return { fields: readStep().fields.length, filled, needs, stuck };
 }
 
 /** Fill one field: the one holding this control. Overwrites what's there. */
@@ -147,7 +162,7 @@ export async function fillOne(control: Element, say: Say) {
 async function fillAll(say: Say, retry = false): Promise<FillReport> {
   const here = await fillFrame(say, retry);
   const frames: FillReport = top && !stopping ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
-  return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs], cut: frames.cut };
+  return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs], cut: frames.cut, stuck: here.stuck };
 }
 
 /** What this frame's page shows a run (see Look). */
@@ -224,7 +239,7 @@ export async function continueRun(say: Say, resume = false) {
   let run = (resume && (await ask<Run | null>({ t: 'run:get' }))) || newRun();
   run.active = true;
   await save(run);
-  if (!resume) { await ask({ t: 'uploads', clear: true }).catch(() => {}); await begin(say); }
+  if (!resume) { settled.keys.clear(); await ask({ t: 'uploads', clear: true }).catch(() => {}); await begin(say); }
   const stillOn = async () => !stopping && !!(await ask<Run | null>({ t: 'run:get' }))?.active;
   let report: FillReport = { fields: 0, filled: 0, needs: [] };
   const halted = () => say(stopping ? 'Stopped.' : Date.now() - run.lastClickAt < 10000 ? 'Carrying on in the tab that just opened' : 'Stopped.', stopping ? report.needs : undefined);
@@ -248,6 +263,7 @@ export async function continueRun(say: Say, resume = false) {
     if (first.signIn && first.fields <= SIGN_IN_FIELDS && !(await waitForYou('Sign in or create your account. JobDemon carries on after.'))) return halted();
     report = await fillAll(say);
     if (!(await stillOn())) return halted();
+    if (report.stuck) return stop(`Stopped at a question it couldn't answer. ${report.stuck}. Fill it in, then press Fill page to carry on.`);
     // The form loaded again while being filled (some read your resume, then redraw the form with it): fill what's left.
     if (report.cut) {
       if (reloads >= MAX_RELOADS) return stop('The form keeps reloading while JobDemon fills it. Check it, then press Fill page to carry on.');
@@ -317,6 +333,7 @@ export async function continueRun(say: Say, resume = false) {
       log({ type: 'retry', flagged });
       report = await fillAll(say, true);
       if (!(await stillOn())) return halted();
+      if (report.stuck) return stop(`Stopped at a question it couldn't answer. ${report.stuck}. Fill it in, then press Fill page to carry on.`);
       continue;
     }
     if (tries === 1 || tries >= 3) return stop(`The page didn't move on from "${step.name || 'this step'}"${step.errors.length ? `. It says: ${step.errors.join(' / ')}` : ''}`);

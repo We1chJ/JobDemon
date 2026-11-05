@@ -333,7 +333,10 @@ try {
   check('Standard markup: every step filled, stops at "Submit application"', await p15.locator('#send').isVisible(), await status(p15));
   const wd32 = await run('http://acme.myworkdayjobs.com:4100/jobs/32');
   const heard32 = await wd32.locator('[data-search=source] [data-automation-id=selectedItem]').first().innerText().catch(() => '');
-  check('Workday: "How did you hear" takes the first option down each list, even a long one (Advertisement > Billboard)', heard32 === 'Billboard', heard32);
+  check('Workday: "How did you hear" takes the first option down each list, even a long one with a slow sub-list (Advertisement > Billboard)', heard32 === 'Billboard', heard32);
+  const wd35 = await run('http://acme.myworkdayjobs.com:4100/jobs/35');
+  check('Workday: stops at a required question it can\'t answer, and fills nothing after it', /Stopped at.*Employee ID/.test(await status(wd35)) && (await val(wd35, '#legalNameSection_firstName')) === '' && await wd35.locator('[data-name="My Information"]').isVisible(), await status(wd35));
+  await wd35.close();
   await wd32.close();
   check('Standard markup: combobox tree picked (Job Board > LinkedIn)', (await chips15('heard')) === 'LinkedIn', await chips15('heard'));
   check('Standard markup: search-only combobox searched and picked', (await chips15('dial')) === 'United States of America (+1)', await chips15('dial'));

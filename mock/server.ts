@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer', '26': 'Old Message Engineer', '27': 'Slow Reply Engineer', '28': 'Framed Submit Engineer', '29': 'Submit Now Engineer', '30': 'Apply Button Engineer', '31': 'Apply Posting Engineer', '32': 'Hear About Engineer', '33': 'Slow Footer Engineer', '34': 'No Button Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer', '26': 'Old Message Engineer', '27': 'Slow Reply Engineer', '28': 'Framed Submit Engineer', '29': 'Submit Now Engineer', '30': 'Apply Button Engineer', '31': 'Apply Posting Engineer', '32': 'Hear About Engineer', '33': 'Slow Footer Engineer', '34': 'No Button Engineer', '35': 'In Order Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -86,7 +86,7 @@ function workdayApply(job: string) {
 <ol data-automation-id="progressBar">${steps.map((s, i) => `<li data-step="${i}">${s}</li>`).join('')}</ol>
 <div data-automation-id="errorBanner" id="banner" role="alert" hidden></div>
 <section class="wd-step" data-name="My Information"><h2>My Information</h2>
-${wdSearch('source', 'How Did You Hear About Us?', true)}
+${job === '35' ? wdText('employeeId', 'Employee ID', true) : ''}${wdSearch('source', 'How Did You Hear About Us?', true)}
 ${wdText('legalNameSection_firstName', 'First Name', true)}${wdText('legalNameSection_lastName', 'Last Name', true)}
 ${wdSelect('countryDropdown', 'Country', ['United States of America', 'Canada', 'India'], true)}
 ${wdSearch('phoneCode', 'Country Phone Code', true)}${wdText('phoneNumber', 'Phone Number', true)}
@@ -134,7 +134,7 @@ const codes = ['United States of America (+1)', 'United States Minor Outlying Is
 const pill = (box, t) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = t; box.insertBefore(p, box.firstChild); $('input', box).value = ''; closePop(); };
 $$('.wd-search').forEach((box) => {
   const input = $('input', box), which = box.dataset.search;
-  const open = () => { input.focus(); if (which === 'source') openPop(box, Object.keys(tree), (cat) => openPop(box, tree[cat], (leaf) => pill(box, leaf)));
+  const open = () => { input.focus(); if (which === 'source') openPop(box, Object.keys(tree), (cat) => setTimeout(() => openPop(box, tree[cat], (leaf) => pill(box, leaf)), ${job === '32' ? 1500 : 0}));
     else if (which === 'skills') openPop(box, ['Leadership', 'Communication'], (t) => pill(box, t)); else closePop(); };
   $('.cover', box).onclick = open;
   input.onclick = open;
@@ -446,7 +446,8 @@ export function mockApp() {
 <h1>${ROLES['17']}</h1>${JD}<iframe src="/embed/job_app?for=17" width="900" height="1400"></iframe></body></html>`));
   // 16: a company careers page (not Workday) whose Apply opens the Workday application in a new tab.
   app.get('/jobs/16', (c) => c.html(overview('16', '', '<a href="/jobs/16/apply" target="_blank">Apply now</a>')));
-  app.get('/jobs/32', (c) => c.html(workdayApply('32'))); // opened at a Workday address: its first option, a long list
+  app.get('/jobs/32', (c) => c.html(workdayApply('32'))); // opened at a Workday address: its first option, a long list, a slow sub-list
+  app.get('/jobs/35', (c) => c.html(workdayApply('35'))); // opened at a Workday address: a required question first that your data can't answer
   app.get('/jobs/16/apply', (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply('16')) : c.html(workdaySignIn('16'))));
   // 15: the same application built with standard markup only (no Workday names), behind the same sign-in.
   app.get('/jobs/15', (c) => c.html(altPosting('15')));

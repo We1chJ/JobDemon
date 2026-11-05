@@ -3,7 +3,7 @@ import type { Action, HistoryItem } from './store.js';
 import type { Answer, JobCtx, Question } from './types.js';
 
 /** What a frame did when asked to fill its page. */
-export interface FillReport { fields: number; filled: number; needs: string[]; cut?: boolean } // cut: a form reloaded while being filled
+export interface FillReport { fields: number; filled: number; needs: string[]; cut?: boolean; stuck?: string } // cut: a form reloaded while being filled; stuck: why the fill stopped at a question
 /** What a page, or a form embedded in it, shows a run: enough to wait at a sign-in, find Next, and see it move on. */
 export interface Look {
   frame?: number; // the embedded form's frame (none: the page itself)
