@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer', '26': 'Old Message Engineer', '27': 'Slow Reply Engineer', '28': 'Framed Submit Engineer', '29': 'Submit Now Engineer', '30': 'Apply Button Engineer', '31': 'Apply Posting Engineer', '32': 'Hear About Engineer' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -128,7 +128,7 @@ document.addEventListener('click', (e) => {
   openPop(b, b.dataset.options.split('|'), (t) => { b.textContent = t; closePop(); }, '', 'listbox');
 });
 // Search lists: "source" is a two-level tree that opens on click; "phoneCode" shows nothing until you search.
-const tree = { 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram', 'Facebook'], 'Other': ['Other'] };
+const tree = ${job === '32' ? JSON.stringify(Object.fromEntries([['Advertisement', ['Billboard', 'Radio']], ...Array.from({ length: 110 }, (_, i) => [`Source ${i}`, ['Somewhere']]), ['Other', ['Other']]])) : "{ 'Job Board': ['LinkedIn', 'Indeed'], 'Social Media': ['Instagram', 'Facebook'], 'Other': ['Other'] }"};
 const skillList = ['TypeScript', 'Node.js', 'PostgreSQL', 'AWS', 'Java', 'Leadership', 'Communication'];
 const codes = ['United States of America (+1)', 'United States Minor Outlying Islands (+1)', 'United Kingdom (+44)', 'India (+91)'];
 const pill = (box, t) => { const p = document.createElement('div'); p.setAttribute('data-automation-id', 'selectedItem'); p.textContent = t; box.insertBefore(p, box.firstChild); $('input', box).value = ''; closePop(); };
@@ -446,6 +446,7 @@ export function mockApp() {
 <h1>${ROLES['17']}</h1>${JD}<iframe src="/embed/job_app?for=17" width="900" height="1400"></iframe></body></html>`));
   // 16: a company careers page (not Workday) whose Apply opens the Workday application in a new tab.
   app.get('/jobs/16', (c) => c.html(overview('16', '', '<a href="/jobs/16/apply" target="_blank">Apply now</a>')));
+  app.get('/jobs/32', (c) => c.html(workdayApply('32'))); // opened at a Workday address: its first option, a long list
   app.get('/jobs/16/apply', (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply('16')) : c.html(workdaySignIn('16'))));
   // 15: the same application built with standard markup only (no Workday names), behind the same sign-in.
   app.get('/jobs/15', (c) => c.html(altPosting('15')));
@@ -595,6 +596,19 @@ sk.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { skl.hidden 
 <form onsubmit="return false"><div><label for="fn25">First Name *</label><input id="fn25" required></div><div><label for="ln25">Last Name *</label><input id="ln25" required></div><div><label for="em25">Email *</label><input id="em25" type="email" required></div>
 <iframe id="cap25" src="/jobs/9" width="300" height="80"></iframe><p role="alert" id="err25"></p>
 <button type="button" id="go25" onclick="setTimeout(() => document.getElementById('cap25').src = '/jobs/9?again=1', 300); setTimeout(() => document.getElementById('err25').textContent = 'Error: please fix the form', 3000)">Submit</button></form></body></html>`));
+  // 26-30: forms whose Submit goes through in ways that are easy to miss; 31: an Apply that only opens the form.
+  const applicant = '<div><label for="fn">First Name</label><input id="fn"></div><div><label for="ln">Last Name</label><input id="ln"></div><div><label for="em">Email</label><input id="em" type="email"></div>';
+  const shell = (job: string, body: string) => `<!doctype html><html><head><title>${ROLES[job]} | Mockco Careers</title></head><body><main><h1>${ROLES[job]}</h1>${body}</main></body></html>`;
+  const THANKS = '<p>Thank you for applying to Mockco.</p>';
+  const inPlace = `document.querySelector('main').innerHTML = '${THANKS}'`;
+  app.get('/jobs/26', (c) => c.html(shell('26', `<form onsubmit="return false">${applicant}<p role="alert">Please enter all required fields</p><button type="button" id="go" onclick="setTimeout(() => location.href = '/jobs/26/done', 3000)">Submit Application</button></form>`)));
+  app.get('/jobs/27', (c) => c.html(shell('27', `<form onsubmit="return false">${applicant}<button type="button" id="go" onclick="setTimeout(() => { ${inPlace} }, 25000)">Submit Application</button></form>`)));
+  app.get('/jobs/28', (c) => c.html(shell('28', '<iframe src="/jobs/28/form" width="800" height="500"></iframe>')));
+  app.get('/jobs/28/form', (c) => c.html(shell('28', `<form onsubmit="return false">${applicant}<button type="button" id="go" onclick="setTimeout(() => top.location.href = '/jobs/28/done', 500)">Submit Application</button></form>`)));
+  app.get('/jobs/29', (c) => c.html(shell('29', `<form onsubmit="return false">${applicant}<button type="button" id="go" onclick="${inPlace}">Submit now ›</button></form>`)));
+  app.get('/jobs/30', (c) => c.html(shell('30', `<form onsubmit="return false">${applicant}<button type="button" id="go" onclick="${inPlace}">Apply</button></form>`)));
+  app.get('/jobs/31', (c) => c.html(shell('31', `${JD}<script type="application/ld+json">{"@type":"JobPosting"}</script><button type="button" id="go" onclick="this.remove()">Apply now</button>`)));
+  app.get('/jobs/:job/done', (c) => c.html(shell(c.req.param('job'), THANKS)));
   app.get('/jobs/22', (c) => {
     const sec = (id: string, title: string, row: string) => `<div class="sec" id="${id}"><h3><span class="t">${title} (1)</span><span>*</span> required.</h3>
 <div class="rows"><div class="row">${row}</div></div><button type="button" class="add">Add More <span>(${title})</span></button></div>`;

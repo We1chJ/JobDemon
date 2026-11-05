@@ -9,7 +9,7 @@ export const unanswered = (q: Question, why: string): Answer => (q.required ? { 
 // The AI chooses among at most this many options at once (Jev's limit is 255).
 const MAX_CHOICES = 200;
 // "How did you hear about us?" never stays blank: when no option fits, the first one is chosen.
-const HEARD = /how (did|do) you (hear|learn|find out) about|where did you (hear|learn|find out) about/i;
+export const HEARD = /how (did|do) you (hear|learn|find out) about|where did you (hear|learn|find out) about/i;
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []);
 /** The options of a very long list closest to a known answer, plus any "Other" / "not listed" option. */
 function shortlist(options: string[], want: string, keep = 40) {

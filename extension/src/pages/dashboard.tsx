@@ -9,7 +9,7 @@ import { STATUS, ago, badge, render } from './ui.js';
 
 // ── Numbers for the charts ──────────────────────────────────────────────────
 interface Stats {
-  totals: { all: number; submitted: number; thisWeek: number; needYou: number };
+  totals: { all: number; submitted: number; thisWeek: number };
   heatmap: { date: string; count: number }[]; // submitted per day, last 20 weeks, oldest first, starting on a Sunday
   daily: { date: string; added: number; submitted: number }[]; // last 30 days
   status: { name: string; value: number; tone: string }[];
@@ -57,7 +57,7 @@ function computeStats(apps: HistoryItem[]): Stats {
   for (const a of apps) { const d = new Date(a.createdAt); d.setDate(d.getDate() - d.getDay()); savedIn.set(ymd(d), (savedIn.get(ymd(d)) ?? 0) + savedBy(a)); }
   const weeks = Array.from({ length: 8 }, (_, i) => { const week = ymd(back(today.getDay() + 7 * (7 - i))); return { week, hours: +((savedIn.get(week) ?? 0) / 3600).toFixed(1) }; });
   return {
-    totals: { all: apps.length, submitted: count('applied'), thisWeek: [...submittedOn].filter(([k]) => k >= weekStart).reduce((n, [, v]) => n + v, 0), needYou: count('needs_you') + count('filled') },
+    totals: { all: apps.length, submitted: count('applied'), thisWeek: [...submittedOn].filter(([k]) => k >= weekStart).reduce((n, [, v]) => n + v, 0) },
     heatmap, daily, status, portals: top,
     saved: { total: [...savedIn.values()].reduce((n, v) => n + v, 0), thisWeek: savedIn.get(weekStart) ?? 0, apps: apps.filter((a) => savedBy(a) > 0).length, weeks },
   };
@@ -153,7 +153,7 @@ function Charts({ s }: { s: Stats }) {
           </AreaChart>
         </ResponsiveContainer>
       </Card>
-      <Card title="Status" value={s.totals.needYou} sub="waiting on you">
+      <Card title="Status" value={s.totals.submitted} sub="applied">
         <div className="donut">
           <ResponsiveContainer width={84} height={84}>
             <PieChart>
@@ -202,7 +202,6 @@ async function draw() {
   const settings = await store.settings(), profile = await store.profile(), resume = await store.file('resume');
   const missing = [!(settings.typesafeKey && settings.openaiKey) && 'add your AI keys', !resume && 'upload your resume', !profile.fields.first_name && 'fill in your profile'].filter(Boolean);
   const shown = apps.filter((a) => filter === 'all' || a.status === filter).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
-  const yourTurn = apps.filter((a) => YOUR_TURN.includes(a.status));
   const n = (s: string) => (s === 'all' ? apps.length : apps.filter((a) => a.status === s).length);
   const pages = Math.max(1, Math.ceil(shown.length / PAGE));
   const page = Math.min(pages, Math.max(1, Number(q.get('p')) || 1));
@@ -211,11 +210,6 @@ async function draw() {
   render('dashboard', html`
 ${missing.length ? html`<div class="callout t-warn" role="status"><b>Finish Setup first:</b> ${missing.join(', ')}. <a href="setup.html">Setup</a></div>` : ''}
 <div id="charts" class="charts-slot" aria-label="Activity"></div>
-${yourTurn.length ? html`<section class="sec" aria-labelledby="turn-h">
-<div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="muted">${yourTurn.length}</span></div>
-<ul class="turn">${yourTurn.map((a) => html`<li><div class="turn-main">${badge(a.status)} ${title(a)}<div class="turn-what">${what(a)}</div>${letter(a)}</div>
-<div class="row"><a class="btn btn-primary" href="${a.url}" target="_blank" rel="noopener">Open</a>${actions(a)}</div></li>`)}</ul>
-</section>` : ''}
 <section class="sec" aria-labelledby="list-h">
 <h2 id="list-h" class="sr">Applications</h2>
 <p class="note">Open a job application in any tab and use the JobDemon widget on the page (or click the toolbar icon): <b>Fill page</b> fills it and goes on page by page, stopping at Submit.</p>
@@ -223,7 +217,7 @@ ${yourTurn.length ? html`<section class="sec" aria-labelledby="turn-h">
 ${open ? html`<nav class="filters" aria-label="Filter by status">${FILTERS.map(([k, l]) => html`<a href="${link({ s: k })}" ${filter === k ? raw('aria-current="true"') : ''}>${l} <b>${n(k)}</b></a>`)}</nav>
 ${shown.length ? html`<table class="tbl"><thead><tr><th class="c-status">Status</th><th>Role</th><th class="c-portal">Portal</th><th class="c-when">Updated</th><th class="c-actions"><span class="sr">Actions</span></th></tr></thead><tbody>${shown.slice((page - 1) * PAGE, page * PAGE).map((a) => html`<tr>
 <td class="c-status">${badge(a.status)}</td>
-<td style="min-width:0">${title(a)}${YOUR_TURN.includes(a.status) ? html`<div class="app-reason">${what(a)}</div>` : ''}</td>
+<td style="min-width:0">${title(a)}${YOUR_TURN.includes(a.status) ? html`<div class="app-reason">${what(a)}</div>` : ''}${letter(a)}</td>
 <td class="c-portal">${portalOf(a)}</td>
 <td class="c-when">${ago(a.updatedAt)}</td>
 <td class="c-actions"><div class="row">${actions(a)}</div></td>
@@ -247,4 +241,4 @@ document.addEventListener('click', async (e) => {
 });
 // Fills and submissions in other tabs show up here as they happen.
 chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.history) void draw(); });
-void draw();
+void store.checkOffWaiting().then(draw);

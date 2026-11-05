@@ -26,12 +26,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const ctx: BrowserContext = await chromium.launchPersistentContext('', {
   headless: true, channel: 'chromium', viewport: { width: 1280, height: 900 },
-  args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`],
+  args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, '--host-resolver-rules=MAP acme.myworkdayjobs.com 127.0.0.1'],
 });
 ctx.on('page', (p) => p.on('console', (m) => { if (process.env.LOG && m.text().startsWith('JobDemon')) console.log(`   ${m.text()}`); }));
 const sw: Worker = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'));
 await sw.evaluate((data) => chrome.storage.local.set(data), {
-  profile, bank: tpl('answer_bank.example.json'), settings: { typesafeKey: '', openaiKey: '', openaiModel: 'gpt-4.1', fake: true },
+  checkedOff: true, profile, bank: tpl('answer_bank.example.json'), settings: { typesafeKey: '', openaiKey: '', openaiModel: 'gpt-4.1', fake: true },
   'file:resume': pdf('resume.pdf', '%PDF-1.4 fake resume'), 'file:transcript': pdf('transcript.pdf', '%PDF-1.4 fake transcript'),
 });
 const history = () => sw.evaluate(async () => (await chrome.storage.local.get('history')).history ?? {}) as Promise<Record<string, { url: string; status: string; needs: string[]; company: string; role: string; letter?: string; actions?: Record<string, number> }>>;
@@ -331,6 +331,10 @@ try {
   const v15 = (sel: string) => val(p15, sel);
   const chips15 = async (id: string) => (await p15.locator(`#${id}`).locator('xpath=..').locator('.chips [role=option]').allInnerTexts()).join(', ');
   check('Standard markup: every step filled, stops at "Submit application"', await p15.locator('#send').isVisible(), await status(p15));
+  const wd32 = await run('http://acme.myworkdayjobs.com:4100/jobs/32');
+  const heard32 = await wd32.locator('[data-search=source] [data-automation-id=selectedItem]').first().innerText().catch(() => '');
+  check('Workday: "How did you hear" takes the first option down each list, even a long one (Advertisement > Billboard)', heard32 === 'Billboard', heard32);
+  await wd32.close();
   check('Standard markup: combobox tree picked (Job Board > LinkedIn)', (await chips15('heard')) === 'LinkedIn', await chips15('heard'));
   check('Standard markup: search-only combobox searched and picked', (await chips15('dial')) === 'United States of America (+1)', await chips15('dial'));
   check('Standard markup: skills searched one by one', (await chips15('skills')).split(', ').sort().join(',') === 'AWS,Node.js,PostgreSQL,TypeScript', await chips15('skills'));
@@ -370,11 +374,33 @@ try {
   await sleep(6000);
   check('a frame reloading on the page never counts as your Submit going through', (await item(u(25)))?.status !== 'applied', (await item(u(25)))?.status);
 
+  const again = await run(u(1));
+  check('filling a submitted job again keeps it applied', (await item(u(1)))?.status === 'applied', (await item(u(1)))?.status);
+  await again.close();
+  const submits = async (n: number, wait: number) => {
+    const p = await run(u(n));
+    await p.locator('#go').click();
+    for (let i = 0; i < wait * 2 && (await item(u(n)))?.status !== 'applied'; i++) await sleep(500);
+    return (await item(u(n)))?.status;
+  };
+  check('a message from before your click does not hide the thank-you page', (await submits(26, 12)) === 'applied');
+  check('a site that takes 25 s to confirm still counts', (await submits(27, 32)) === 'applied');
+  const p28 = await run(u(28));
+  await p28.frameLocator('iframe').locator('#go').click();
+  for (let i = 0; i < 24 && (await item(u(28)))?.status !== 'applied'; i++) await sleep(500);
+  check('a form in a frame counts when the whole page moves to its thank-you page', (await item(u(28)))?.status === 'applied', (await item(u(28)))?.status);
+  check('other wording counts: "Submit now ›"', (await submits(29, 8)) === 'applied');
+  check('"Apply" counts on a filled form', (await submits(30, 8)) === 'applied');
+  const p31 = await open(u(31));
+  await p31.locator('#go').click();
+  await sleep(4000);
+  check('"Apply now" on a posting is not a Submit', (await item(u(31)))?.status !== 'applied', (await item(u(31)))?.status);
+
   // The extension's own pages.
   const dash = await ctx.newPage();
   await dash.goto(`chrome-extension://${new URL(sw.url()).host}/pages/dashboard.html`);
   await dash.locator('.cc').first().waitFor({ timeout: 5000 }).catch(() => {});
-  check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '1');
+  check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '6');
   check('Dashboard: Time saved is the big card on top, an estimate from your applications', /^[1-9\d.]+ (minutes|hours)$/.test(await dash.locator('.hero-value').innerText()), await dash.locator('.hero-value').innerText());
   await dash.locator('a', { hasText: 'Show all applications' }).click();
   await dash.locator('.tbl').waitFor({ timeout: 5000 }).catch(() => {});
@@ -420,6 +446,7 @@ try {
   check('Import brings everything back', (await setup.locator('input[name=first_name]').inputValue()) === 'Jane' && Object.keys(await history()).length >= 10);
 
   // Auto-submit: off unless you turn it on; then it clicks Submit, but only on a form with nothing left for you.
+  await sw.evaluate(async (url) => { const { history: h } = await chrome.storage.local.get('history'); for (const k of Object.keys(h)) if (h[k].url === url) delete h[k]; await chrome.storage.local.set({ history: h }); }, u(1)); // a new application for this job
   const pa = await open(u(1));
   await panel(pa).locator('button[aria-label=More]').click();
   await panel(pa).locator('[role=menuitemcheckbox]', { hasText: 'Auto-submit' }).click();
@@ -433,6 +460,25 @@ try {
   for (let i = 0; i < 30 && (await item(u(1)))?.status !== 'applied'; i++) await sleep(500);
   check('Auto-submit: a complete form is submitted and marked applied', submissions.length === posted + 1 && (await item(u(1)))?.status === 'applied', `${submissions.length - posted} submitted, ${(await item(u(1)))?.status}`);
   await sw.evaluate(() => chrome.storage.local.set({ autoSubmit: false }));
+
+  // A job an older version put back to "Ready to submit": its submitted date brings it back to Applied.
+  await sw.evaluate(async (url) => { const { history: h } = await chrome.storage.local.get('history'); for (const k of Object.keys(h)) if (h[k].url === url) Object.assign(h[k], { status: 'filled', submittedAt: new Date().toISOString() }); await chrome.storage.local.set({ history: h }); }, u(4));
+  const healed = await ctx.newPage();
+  await healed.goto(`chrome-extension://${new URL(sw.url()).host}/pages/dashboard.html?list=1&s=applied`);
+  await healed.locator('.tbl').waitFor({ timeout: 5000 }).catch(() => {});
+  check('a submitted job overwritten by an older version shows as Applied again', /Data Engineer/.test(await healed.locator('.tbl').innerText().catch(() => '')));
+
+  // Applications are finished on the page: what the old "Your turn" list held is checked off, once.
+  const waiting = (await item(u(3)))?.status;
+  await sw.evaluate(() => chrome.storage.local.remove('checkedOff'));
+  await healed.reload();
+  for (let i = 0; i < 10 && (await item(u(3)))?.status !== 'applied'; i++) await sleep(500);
+  check('jobs waiting on you are checked off once', waiting === 'needs_you' && (await item(u(3)))?.status === 'applied', `${waiting} then ${(await item(u(3)))?.status}`);
+  check('the dashboard has no "Your turn" list', !/your turn|waiting on you/i.test(await healed.locator('body').innerText()));
+  await sw.evaluate(async (url) => { const { history: h } = await chrome.storage.local.get('history'); for (const k of Object.keys(h)) if (h[k].url === url) { h[k].status = 'filled'; delete h[k].submittedAt; } await chrome.storage.local.set({ history: h }); }, u(3));
+  await healed.reload();
+  await sleep(1500);
+  check('a later job stays as it is', (await item(u(3)))?.status === 'filled', (await item(u(3)))?.status);
 } catch (e) {
   console.error(e);
   failed++;

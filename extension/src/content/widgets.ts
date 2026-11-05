@@ -2,8 +2,9 @@
 // Each turns its field into a Question, gets the Answer from the background (the AI), applies it with the same
 // DOM events a person's typing and clicking would send, and checks the result by reading the field again.
 // Handlers know how controls behave, never what to answer.
-import { unanswered } from '../shared/answer.js';
+import { HEARD, unanswered } from '../shared/answer.js';
 import { ask, type FileReply } from '../shared/msg.js';
+import { portalName } from '../shared/portal.js';
 import type { Answer, Question } from '../shared/types.js';
 import { everywhere, inside, PLACEHOLDER, readStep, shown, type Field, type WidgetKind } from './read.js';
 import { log } from './log.js';
@@ -182,9 +183,11 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   let options = fresh();
   for (let i = 0; i < 6 && !options.length; i++) { await sleep(500); options = fresh(); }
   const chosen: string[] = [];
+  // Workday's "How did you hear about us?": its first option, down each sub-list. Nothing to choose.
+  const first = portalName(location.hostname) === 'Workday' && HEARD.test(f.label);
   const pickFrom = async (list: HTMLElement[]) => {
     const labels = list.map(optLabel);
-    const a = await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });
+    const a: Answer = first ? { kind: 'pick', indexes: [0], because: 'the first option' } : await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });
     log({ type: 'list', q: prompt(f), offered: labels.slice(0, 40), total: labels.length, picked: a.kind === 'pick' ? labels[a.indexes[0]] : `none (${a.because})`, confidence: a.kind === 'pick' ? a.confidence : undefined });
     if (a.kind !== 'pick') return a;
     press(list[a.indexes[0]]);
@@ -193,7 +196,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
     return a;
   };
 
-  let browse = options.length > 0 && options.length < LONG_LIST;
+  let browse = options.length > 0 && (first || options.length < LONG_LIST);
   for (let level = 0; browse && level < 3 && options.length; level++) {
     const a = await pickFrom(options);
     if (a.kind !== 'pick') {

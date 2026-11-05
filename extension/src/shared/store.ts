@@ -59,8 +59,21 @@ export const store = {
   /** Your switch on the bar: click Submit when a form is complete. Off unless you turn it on. */
   autoSubmit: () => get<boolean>('autoSubmit', false),
   setAutoSubmit: (on: boolean) => set('autoSubmit', on),
-  history: () => get<Record<string, HistoryItem>>('history', {}),
+  history: async () => {
+    const h = await get<Record<string, HistoryItem>>('history', {});
+    // Submitted stays submitted (older versions let a later fill overwrite it, but kept the date).
+    for (const a of Object.values(h)) if (a.submittedAt && a.status !== 'removed') a.status = 'applied';
+    return h;
+  },
   setHistory: (h: Record<string, HistoryItem>) => set('history', h),
+  /** Once: applications are finished on the page now, so what the dashboard's old "Your turn" list held is checked off. */
+  checkOffWaiting: async () => {
+    if (await get<boolean>('checkedOff', false)) return;
+    const h = await store.history();
+    for (const a of Object.values(h)) if (a.status === 'filled' || a.status === 'needs_you') Object.assign(a, { status: 'applied', needs: [], submittedAt: a.updatedAt });
+    await store.setHistory(h);
+    await set('checkedOff', true);
+  },
   /** Written answers already generated for a job, so a re-fill reuses them instead of writing again. */
   cached: async (key: string) => (await get<Record<string, string>>('written', {}))[key],
   cache: async (key: string, text: string) => set('written', { ...(await get<Record<string, string>>('written', {})), [key]: text }),
@@ -100,7 +113,7 @@ export async function updateHistory(url: string, patch: Partial<HistoryItem>) {
   const now = new Date().toISOString();
   const prev = h[key];
   const base: HistoryItem = prev ?? { key, url, company: '', role: '', portal: '', status: 'in_progress', needs: [], createdAt: now, updatedAt: now };
-  h[key] = { ...base, ...patch, key, updatedAt: now, ...(patch.status === 'applied' && prev?.status !== 'applied' ? { submittedAt: now } : {}) };
+  h[key] = { ...base, ...patch, key, updatedAt: now, ...(patch.status === 'applied' && prev?.status !== 'applied' ? { submittedAt: now } : {}), ...(prev?.status === 'applied' ? { status: 'applied' as const, needs: [] } : {}) };
   await store.setHistory(h);
   return h[key];
 }

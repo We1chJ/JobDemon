@@ -178,9 +178,10 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
       return true;
     }
     case 'submit:get': {
-      // Only the frame that was submitted: another frame loading (a captcha, an ad) says nothing about it.
+      // Only the frame that was submitted, or the whole page: another frame loading (a captcha, an ad) says nothing about it.
       const p = (await session.get(`submit:${id}`))[`submit:${id}`] as Sent | undefined;
-      return p && Date.now() - p.at < 120000 && p.frame === (sender.frameId ?? 0) ? p : null;
+      const here = sender.frameId ?? 0;
+      return p && Date.now() - p.at < 120000 && (p.frame === here || here === 0) ? { ...p, frame: p.frame === here ? 0 : p.frame } : null;
     }
     case 'submit:done': {
       const sent = (await session.get(`submit:${id}`))[`submit:${id}`] as Sent | undefined;
