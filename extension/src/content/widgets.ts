@@ -70,7 +70,7 @@ function typeInto(el: HTMLElement, value: string) {
 const leave = (el: HTMLElement) => { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.blur(); };
 
 // Lines drawn as options that aren't choices: "nothing here" messages, and the prompt ("Select One", "Please select…").
-const NOT_A_CHOICE = /^(no (items|results|matches|options)( found)?|nothing found)\.?$|^(select|choose|pick)( one| an? \w+)?\W*$|^please (select|choose)\b|^[-–—\s]*make a selection/i;
+const NOT_A_CHOICE = /^(no (items|results|matches|options)( found)?|nothing found|no selection)\.?$|^(select|choose|pick)( one| an? \w+)?\W*$|^please (select|choose)\b|^[-–—\s]*make a selection/i;
 
 /** Options showing right now (outside the field, or inside it but not already chosen). */
 function visibleOptions(f: Field): HTMLElement[] {
@@ -200,7 +200,7 @@ async function pick(f: Field, d: Deps): Promise<Result> {
   const chosen: string[] = [];
   let typedIn: HTMLElement | undefined; // the box typed into to search the list
   // Workday's "How did you hear about us?": its first option, down each sub-list. Nothing to choose.
-  const first = portalName(location.hostname) === 'Workday' && HEARD.test(f.label);
+  const first = ['Workday', 'SuccessFactors'].includes(portalName(location.hostname)) && HEARD.test(f.label);
   const pickFrom = async (list: HTMLElement[]) => {
     const labels = list.map(optLabel);
     const a: Answer = first ? { kind: 'pick', indexes: [0], because: 'the first option' } : await answer({ ...q, prompt: chosen.length ? `${prompt(f)} > ${chosen.join(' > ')}` : prompt(f), candidates: labels });

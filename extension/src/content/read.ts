@@ -7,7 +7,7 @@ import { portalName } from '../shared/portal.js';
 export type WidgetKind = 'text' | 'textarea' | 'native' | 'pick' | 'checkbox' | 'checkgroup' | 'radio' | 'buttons' | 'date' | 'file' | 'unknown';
 
 /** A dropdown's prompt rather than a choice: "Select", "Please select a State/Province", "— Make a Selection —". */
-export const PLACEHOLDER = /^[-–—\s]*((please )?(select|choose|pick)\b|make a selection)|^search$|^[-–—]+$|^[-–—]{2,}|^\d+ items? selected$/i;
+export const PLACEHOLDER = /^[-–—\s]*((please )?(select|choose|pick)\b|make a selection)|^search$|^[-–—]+$|^[-–—]{2,}|^\d+ items? selected$|^no selection$/i;
 
 export interface Field {
   key: string; // stable identity on this page: container name + entry + label
@@ -111,7 +111,7 @@ export function inside(a: Element, b: Element) {
 }
 
 // The site's own header and search (job search, filters) are not the application.
-const CHROME = 'header, nav, [role=banner], [role=navigation], [role=search]';
+const CHROME = 'header, nav, [role=banner], [role=navigation], [role=search], .sfDropMenuBtn'; // SuccessFactors' Options and Language menus
 const SEL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=password]), textarea, select, '
   + 'button[aria-haspopup], [role=combobox], [role=checkbox], [role=radio], [role=spinbutton], [contenteditable=true]';
 const input = (el: Element) => el as HTMLInputElement;

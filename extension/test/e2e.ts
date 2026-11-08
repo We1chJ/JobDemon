@@ -26,7 +26,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const ctx: BrowserContext = await chromium.launchPersistentContext('', {
   headless: true, channel: 'chromium', viewport: { width: 1280, height: 900 },
-  args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, '--host-resolver-rules=MAP acme.myworkdayjobs.com 127.0.0.1'],
+  args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, '--host-resolver-rules=MAP acme.myworkdayjobs.com 127.0.0.1, MAP career8.successfactors.com 127.0.0.1'],
 });
 ctx.on('page', (p) => p.on('console', (m) => { if (process.env.LOG && m.text().startsWith('JobDemon')) console.log(`   ${m.text()}`); }));
 const sw: Worker = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'));
@@ -338,6 +338,13 @@ try {
   const wd35 = await run('http://acme.myworkdayjobs.com:4100/jobs/35');
   check('Workday: stops at a required question it can\'t answer, and fills nothing after it', /Stopped at.*Employee ID/.test(await status(wd35)) && (await val(wd35, '#legalNameSection_firstName')) === '' && await wd35.locator('[data-name="My Information"]').isVisible(), await status(wd35));
   await wd35.close();
+  const sf36 = await run('http://career8.successfactors.com:4100/jobs/36');
+  const v36 = (id: string) => sf36.evaluate((i) => (document.getElementById(i) as HTMLInputElement).value, id);
+  check('SuccessFactors: opens the collapsed sections and fills them', (await v36('53:_txtFld')) === 'Jane' && (await v36('91:_txtFld')) === 'jane@example.com' && (await v36('sfcountry')) === 'United States +1',
+    `${await v36('53:_txtFld')} / ${await v36('91:_txtFld')} / ${await v36('sfcountry')}: ${await status(sf36)}`);
+  check('SuccessFactors: "How did you hear" takes the first option', (await v36('sfheard')) === 'Advertisement', await v36('sfheard'));
+  check('SuccessFactors: stops at "Apply" without pressing it', /Done\. Check it, then click "Apply"/.test(await status(sf36)), await status(sf36));
+  await sf36.close();
   await wd32.close();
   check('Standard markup: combobox tree picked (Job Board > LinkedIn)', (await chips15('heard')) === 'LinkedIn', await chips15('heard'));
   check('Standard markup: search-only combobox searched and picked', (await chips15('dial')) === 'United States of America (+1)', await chips15('dial'));

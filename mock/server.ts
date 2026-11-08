@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 export const submissions: { job: string; fields: Record<string, string> }[] = [];
 export const stats = { posts: 0, parses: 0 }; // posts: every submission attempt that reached the server; parses: resumes read by job 23
 
-const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer', '26': 'Old Message Engineer', '27': 'Slow Reply Engineer', '28': 'Framed Submit Engineer', '29': 'Submit Now Engineer', '30': 'Apply Button Engineer', '31': 'Apply Posting Engineer', '32': 'Hear About Engineer', '33': 'Slow Footer Engineer', '34': 'No Button Engineer', '35': 'In Order Engineer' };
+const ROLES: Record<string, string> = { '1': 'Backend Engineer', '2': 'Platform Engineer', '3': 'Security Engineer', '4': 'Data Engineer', '5': 'Agent Engineer', '6': 'ML Engineer', '7': 'Frontend Engineer', '8': 'Infra Engineer', '9': 'Mystery Engineer', '10': 'Robotics Engineer', '11': 'Controls Engineer', '12': 'Hardware Engineer', '13': 'Firmware Engineer', '14': 'Test Engineer', '15': 'Systems Engineer', '16': 'Careers Site Engineer', '17': 'Embedded Form Engineer', '18': 'AI Intern', '19': 'Lever Style Engineer', '20': 'Component Form Engineer', '21': 'Upload Box Engineer', '22': 'Counted Section Engineer', '23': 'Embedded Steps Engineer', '24': 'Repeated Entry Engineer', '25': 'Slow Refusal Engineer', '26': 'Old Message Engineer', '27': 'Slow Reply Engineer', '28': 'Framed Submit Engineer', '29': 'Submit Now Engineer', '30': 'Apply Button Engineer', '31': 'Apply Posting Engineer', '32': 'Hear About Engineer', '33': 'Slow Footer Engineer', '34': 'No Button Engineer', '35': 'In Order Engineer', '36': 'Applied AI Intern' };
 const JD = `<div id="content"><p>Mockco builds payment infrastructure.</p>
 <p>You will design TypeScript services on Node.js and PostgreSQL, own CI, and work with AWS.</p>
 <p>Requirements: 3+ years backend experience, TypeScript, SQL.</p></div>`;
@@ -344,6 +344,30 @@ document.getElementById('next2').onclick = () => show('s2', 's3');
 </script></body></html>`;
 }
 
+// SuccessFactors look-alike: one page, every section collapsed behind its top bar, labels starting "* ",
+// field ids with colons, Options and Language menus above the form, and "Apply" at the end.
+const sfText = (id: string, label: string, required = false) => `<div class="RCMFormField"><label for="${id}:_txtFld">${required ? '* ' : ''}${label}</label>
+<input id="${id}:_txtFld" class="fd-input" type="text" aria-required="${required}"></div>`;
+const sfSection = (id: string, title: string, body: string) => `<button type="button" id="${id}:topBar" class="topBar rcmFormSectionTopBar" aria-expanded="false">${title}</button>
+<div id="${id}:sectionContent" class="sectionContentClosed sectionContent" style="display:none">${body}</div>`;
+function sfApply() {
+  return `<!doctype html><html><head><title>Career Opportunities: Applied AI Intern (14580)</title></head><body>
+<div role="region"><a href="#" class="sfDropMenuBtn" role="combobox" aria-label="Language" aria-expanded="false">English US</a>
+<a href="#" class="sfDropMenuBtn" role="button" aria-expanded="false">Options</a></div>
+<h1>Applied AI Intern (14580)</h1>
+<a href="#" id="30:_expandAllSections" class="expandCollapseTxt">Expand all sections</a>
+<form id="sf" onsubmit="return false">
+${sfSection('40', 'Profile Information', sfText('53', 'First Name', true) + sfText('57', 'Preferred Last Name') + sfText('83', 'City', true)
+  + sfText('91', 'Email Address', true) + sfText('95', 'Primary Contact Number', true) + combo('sfcountry', 'Country', COUNTRIES, true))}
+${sfSection('118', 'Job-Specific Information', combo('sfheard', 'How did you hear about us? If not applicable, select not applicable', ['No Selection', 'Advertisement', 'Career Fair', 'Not applicable'], true))}
+<button type="button" id="sfsave">Save</button><button type="button" id="sfapply">Apply</button>
+</form>${COMBO_JS}<script>
+const toggle = (b, open) => { b.setAttribute('aria-expanded', String(open)); b.nextElementSibling.style.display = open ? '' : 'none'; b.nextElementSibling.classList.toggle('sectionContentClosed', !open); };
+document.querySelectorAll('.rcmFormSectionTopBar').forEach((b) => b.addEventListener('click', () => toggle(b, b.getAttribute('aria-expanded') !== 'true')));
+document.getElementById('30:_expandAllSections').addEventListener('click', (e) => { e.preventDefault(); setTimeout(() => document.querySelectorAll('.rcmFormSectionTopBar').forEach((b) => toggle(b, true)), 400); });
+</script></body></html>`;
+}
+
 function form(job: string, errors: string[] = [], extra = '') {
   return `<!doctype html><html><head><title>Job Application for ${ROLES[job]} at Mockco</title></head><body>
 <h1>${ROLES[job]}</h1>${JD}
@@ -451,6 +475,7 @@ export function mockApp() {
   // 16: a company careers page (not Workday) whose Apply opens the Workday application in a new tab.
   app.get('/jobs/16', (c) => c.html(overview('16', '', '<a href="/jobs/16/apply" target="_blank">Apply now</a>')));
   app.get('/jobs/32', (c) => c.html(workdayApply('32'))); // opened at a Workday address: its first option, a long list, a slow sub-list
+  app.get('/jobs/36', (c) => c.html(sfApply())); // opened at a SuccessFactors address: every section starts collapsed
   app.get('/jobs/35', (c) => c.html(workdayApply('35'))); // opened at a Workday address: a required question first that your data can't answer
   app.get('/jobs/16/apply', (c) => (getCookie(c, 'wd_session') ? c.html(workdayApply('16')) : c.html(workdaySignIn('16'))));
   // 15: the same application built with standard markup only (no Workday names), behind the same sign-in.

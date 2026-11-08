@@ -208,7 +208,7 @@ const KEY_RULES: [RegExp, string][] = [
   [/\bgpa\b/i, 'gpa'], [/\bact\b/i, 'act_score'], [/\bsat\b/i, 'sat_score'],
   [/street address/i, 'address_street'], [/postal code|zip/i, 'address_zip'], [/mailing address/i, 'mailing_address'],
   [/first name/i, 'first_name'], [/last name/i, 'last_name'], [/e-?mail/i, 'email'],
-  [/country (phone )?code|phone code/i, 'country'], [/phone/i, 'phone'],
+  [/country (phone )?code|phone code/i, 'country'], [/phone|contact number/i, 'phone'],
   [/linkedin/i, 'linkedin_url'], [/github/i, 'github_url'], [/website|portfolio/i, 'website_url'],
   [/location|city/i, 'location_city'], [/country/i, 'country'],
   [/skills/i, 'skills'], [/gender/i, 'gender'], [/pronoun/i, 'pronouns'], [/veteran/i, 'veteran_status'], [/disabilit/i, 'disability_status'],

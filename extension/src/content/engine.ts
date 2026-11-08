@@ -25,6 +25,17 @@ const START = [
 ];
 const NEXT = { id: /pageFooterNextButton|bottom-navigation-next-button/i, text: /^(save (and|&) continue|continue|next( step| page)?)$/i };
 const SUBMIT = /^(submit( (my )?application)?|send( application)?|finish|complete)$/i;
+// SuccessFactors ends its one-page application with a plain "Apply" button.
+const isSubmit = (text: string) => SUBMIT.test(text) || (portalName() === 'SuccessFactors' && /^apply$/i.test(text.trim()));
+/** SuccessFactors draws every section of the form collapsed (hidden): open them all before reading. */
+async function openSections() {
+  const closed = [...document.querySelectorAll<HTMLElement>('button.rcmFormSectionTopBar[aria-expanded="false"]')];
+  if (!closed.length) return false;
+  const all = document.querySelector<HTMLElement>('[id$="_expandAllSections"]');
+  if (all) all.click(); else closed.forEach((b) => b.click());
+  for (let i = 0; i < 10 && document.querySelector('button.rcmFormSectionTopBar[aria-expanded="false"]'); i++) await sleep(300);
+  return true;
+}
 // Buttons that send you to another account (apply with LinkedIn...): never the way into the form.
 /** What filling this field saved you, for the Time saved card (an unticked box saved nothing). */
 const actionOf = (f: Field, detail: string, value: string): Action | null =>
@@ -67,8 +78,9 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
   let filled = 0, step: Step = readStep(), stuck: string | undefined;
   if (pageOf(step) !== settled.page) settled.keys.clear();
   settled.page = pageOf(step);
-  // Workday goes strictly in order: a required question it can't answer stops the fill there.
-  const inOrder = portalName() === 'Workday';
+  // Workday and SuccessFactors go strictly in order: a required question it can't answer stops the fill there.
+  const inOrder = portalName() === 'Workday' || portalName() === 'SuccessFactors';
+  if (portalName() === 'SuccessFactors' && (await openSections())) step = readStep();
   const worth = top || step.fields.length > 0; // embedded frames with no questions (captchas, ads) stay out of the log
   if (worth) snapshot(retry ? 'before filling again (the page flagged fields)' : 'before filling');
   for (let guard = 0; guard < 300 && !stopping; guard++) {
@@ -306,8 +318,8 @@ export async function continueRun(say: Say, resume = false) {
 
     // Page done: Save and Continue, or stop at Submit.
     const next = find(ways, NEXT);
-    const submit = step.buttons.find((b) => SUBMIT.test(b.text));
-    if (!next || SUBMIT.test(next.text)) {
+    const submit = step.buttons.find((b) => isSubmit(b.text));
+    if (!next || isSubmit(next.text)) {
       // Neither Next nor Submit: the page may still be drawing (questions before buttons, a slow save, a pop-up).
       // Wait while it keeps changing; only 20 s with nothing new ends the run, and that isn't "Done".
       if (!submit) {
