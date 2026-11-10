@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { html, raw } from '../shared/html.js';
 import { store, type Action, type HistoryItem, type HistoryStatus } from '../shared/store.js';
+import { Funnel } from './funnel.js';
 import { STATUS, ago, badge, render } from './ui.js';
 
 // ── Numbers for the charts ──────────────────────────────────────────────────
@@ -177,6 +178,7 @@ function Charts({ s }: { s: Stats }) {
         </ResponsiveContainer>
       </Card>
     </div>
+    <Funnel />
     </>
   );
 }

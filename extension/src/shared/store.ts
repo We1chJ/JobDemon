@@ -40,6 +40,10 @@ export interface Backup {
   files: Partial<Record<FileKey, StoredFile>>;
 }
 
+/** One arrow of the job-search chart: how many went from one stage to another. You type these. A Rest line takes
+ * everyone left over from its stage; on a starting stage (nothing flows into it) it also holds the stage's total. */
+export interface Flow { from: string; to: string; value: number; rest?: boolean; total?: number }
+
 const area = () => chrome.storage.local;
 async function get<T>(key: string, fallback: T): Promise<T> {
   const r = await area().get(key);
@@ -57,6 +61,9 @@ export const store = {
   file: (k: FileKey) => get<StoredFile | null>(`file:${k}`, null),
   setFile: (k: FileKey, f: StoredFile | null) => (f ? set(`file:${k}`, f) : area().remove(`file:${k}`)),
   /** Your switch on the bar: click Submit when a form is complete. Off unless you turn it on. */
+  /** Your job-search chart's numbers; null until you first edit them. */
+  funnel: () => get<Flow[] | null>('funnel', null),
+  setFunnel: (f: Flow[]) => set('funnel', f),
   autoSubmit: () => get<boolean>('autoSubmit', false),
   setAutoSubmit: (on: boolean) => set('autoSubmit', on),
   history: async () => {

@@ -139,6 +139,48 @@ input[type=file]::file-selector-button{font:500 14px var(--font);border:1px soli
 .legend i,.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none}
 .legend span{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .legend b{margin-left:auto;padding-left:6px;font-weight:500;font-variant-numeric:tabular-nums}
+/* Your job search (flow chart). Categorical colors: light and dark steps of the same eight hues. */
+.fl{overflow:visible;--f1:#2a78d6;--f2:#eb6834;--f3:#1baf7a;--f4:#eda100;--f5:#e87ba4;--f6:#008300;--f7:#6250d6;--f8:#e34948;margin-top:12px;padding:14px 16px 12px;gap:10px}
+@media (prefers-color-scheme:dark){.fl{--f1:#3987e5;--f2:#d95926;--f3:#199e70;--f4:#c98500;--f5:#d55181;--f6:#008300;--f7:#9085e9;--f8:#e66767}}
+.fl-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.fl-head .cc-head{flex:1}
+.fl-chart{position:relative;overflow-x:auto;overflow-y:hidden}
+.fl-chart svg{display:block}
+.fl-band{fill-opacity:.38;transition:fill-opacity .15s ease-out;cursor:default}
+.fl-band.fl-lit{fill-opacity:.62}
+.fl-band.fl-dim{fill-opacity:.12}
+.fl-labels{pointer-events:none}
+.fl-num,.fl-name{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.fl-num{font:650 20px/1 var(--font);fill:var(--fg);font-variant-numeric:tabular-nums}
+.fl-name{font:13px/1 var(--font);fill:var(--muted)}
+.fl-tip{position:absolute;pointer-events:none;--tx:12px;--ty:12px;transform:translate(var(--tx),var(--ty));z-index:2;white-space:nowrap}
+.fl-tip.fl-up{--ty:calc(-100% - 12px)}.fl-tip.fl-left{--tx:calc(-100% - 12px)}
+.fl-tip-v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.fl-empty{margin:0;padding:28px 12px;text-align:center;color:var(--muted);border:1px dashed var(--rule-strong);border-radius:8px}
+.fl-edit{border-top:1px solid var(--rule);padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.fl-help{margin:0 0 4px;font-size:13px;color:var(--muted)}
+.fl-line{display:flex;flex-direction:column;gap:4px}
+.fl-row{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 96px 58px 36px;gap:8px;align-items:center}
+.fl-cols{font-size:12px;color:var(--muted)}
+.fl-arrow{color:var(--muted);text-align:center}
+.fl-edit input{min-height:36px;padding:0 10px;border:1px solid var(--rule-strong);border-radius:4px;background:var(--bg);color:var(--fg);font:14px var(--font);width:100%}
+.fl-edit input[type=number]{font-variant-numeric:tabular-nums}
+.fl-restv{display:flex;align-items:baseline;gap:4px;white-space:nowrap;overflow:hidden;min-height:36px;padding:0 10px;border:1px dashed var(--rule-strong);border-radius:4px;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;line-height:34px;color:var(--muted)}
+.fl-restv small{font-size:11px;font-weight:400}
+.fl-rest-b{padding:0 8px;width:100%}
+.fl-restwrap{position:relative}
+.fl-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:5;min-width:200px;background:var(--bg);border:1px solid var(--rule-strong);border-radius:8px;box-shadow:0 8px 24px rgb(0 0 0/.14);padding:6px;display:flex;flex-direction:column;gap:2px}
+.fl-menu-h{font-size:12px;color:var(--muted);padding:4px 8px 6px}
+.fl-menu-h b{color:var(--fg);font-weight:600}
+.fl-menu button{text-align:left;border:0;background:none;color:var(--fg);font:14px var(--font);padding:8px;border-radius:5px;cursor:pointer}
+.fl-menu button:hover,.fl-menu button:focus-visible{background:var(--inset)}
+.fl-edit .fl-menu input{margin-top:4px;min-height:34px}
+.fl-rest-b.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.fl-total{display:flex;align-items:center;justify-content:flex-end;gap:8px;font-size:13px;color:var(--muted);margin-right:44px}
+.fl-edit .fl-total input{width:96px}
+.fl-problem{margin:0;font-size:13px;color:var(--warn);font-weight:500;text-align:right;margin-right:44px}
+.fl-actions{display:flex;gap:8px;margin-top:4px}
+@media (max-width:640px){.fl-row{grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) 64px 52px 32px;gap:6px}.fl-edit input{font-size:16px;padding:0 8px}.fl-total,.fl-problem{margin-right:38px}}
 .tip{background:var(--bg);border:1px solid var(--rule-strong);border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 4px 12px rgb(0 0 0/.12);min-width:120px}
 .tip-l{color:var(--muted);margin-bottom:2px}
 .tip-r{display:flex;align-items:center;gap:6px}.tip-r b{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}

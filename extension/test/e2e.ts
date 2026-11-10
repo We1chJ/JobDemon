@@ -416,7 +416,19 @@ try {
   const dash = await ctx.newPage();
   await dash.goto(`chrome-extension://${new URL(sw.url()).host}/pages/dashboard.html`);
   await dash.locator('.cc').first().waitFor({ timeout: 5000 }).catch(() => {});
-  check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '6');
+  check('Dashboard shows the charts, with the full list hidden', (await dash.locator('.tbl').count()) === 0 && (await dash.locator('.charts .cc').count()) === 4 && (await dash.locator('.cc-value').first().innerText()) === '6');
+  // Your job search chart: the usual stages, no numbers; Ghosted takes the rest of the applications.
+  const fl = dash.locator('.fl');
+  check('Dashboard: job search chart starts empty, ready for your numbers', (await fl.locator('.fl-row input[type=number]').count()) === 5 && (await fl.locator('.fl-band').count()) === 0);
+  await fl.getByLabel('Line 1: how many').fill('30');
+  await fl.getByLabel('Line 3: how many').fill('19');
+  await fl.getByLabel('Line 4: how many').fill('11');
+  await fl.getByLabel('How many Applications in total?').fill('100');
+  await sleep(600);
+  const keptFlows = await sw.evaluate(async () => (await chrome.storage.local.get('funnel')).funnel as { value: number }[]);
+  check('Dashboard: job search chart draws what you type, the Rest line takes what\'s left, and it\'s kept',
+    (await fl.locator('.fl-band').count()) === 4 && (await fl.locator('.fl-restv').innerText()).startsWith('51') && (await fl.locator('.cc-value').innerText()) === '100' && keptFlows?.[0]?.value === 30,
+    `${await fl.locator('.fl-band').count()} bands, rest ${await fl.locator('.fl-restv').innerText()}, total ${await fl.locator('.cc-value').innerText().catch(() => '')}`);
   check('Dashboard: Time saved is the big card on top, an estimate from your applications', /^[1-9\d.]+ (minutes|hours)$/.test(await dash.locator('.hero-value').innerText()), await dash.locator('.hero-value').innerText());
   await dash.locator('a', { hasText: 'Show all applications' }).click();
   await dash.locator('.tbl').waitFor({ timeout: 5000 }).catch(() => {});
