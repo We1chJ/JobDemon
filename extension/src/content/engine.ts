@@ -35,6 +35,20 @@ const ELSEWHERE = /apply with|sign (in|up) with|log ?in with|continue with|impor
 // The login and password of the account a form creates: yours to choose.
 const ACCOUNT = /^(log ?in|user ?(name|id)|password)\b/i;
 
+/** Workday saves each answer and can redraw the form after it (Country rebuilds the address). Acting while that is
+ * still going on can land on a box that's about to be replaced, or press Save and Continue mid-save. On Workday, wait
+ * until the page has gone `calm` ms without changing and shows nothing busy, at most `max` ms. Elsewhere: no wait. */
+const BUSY = '[aria-busy="true"], [data-automation-id*="loading" i], [data-automation-id*="spinner" i]';
+async function quiet(calm: number, max: number) {
+  if (portalName() !== 'Workday') return;
+  let last = Date.now();
+  const watch = new MutationObserver(() => { last = Date.now(); });
+  watch.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  const start = Date.now();
+  while (Date.now() - start < max && (Date.now() - last < calm || document.querySelector(BUSY))) await sleep(100);
+  watch.disconnect();
+}
+
 type Way = Look['buttons'][number];
 // By wording, preferring the page's footer (where Next lives); the portal's own button names as a fallback.
 const find = (buttons: Way[], b: { id: RegExp; text: RegExp }) =>
@@ -126,6 +140,7 @@ export async function fillFrame(say: Say, retry = false): Promise<FillReport> {
       if (r.status !== 'filled') settled.keys.set(f.key, !!f.required);
       if (r.status === 'escalate') needs.push(label);
       if (r.status === 'escalate' && f.required && inOrder) { stuck = r.detail; break; }
+      await quiet(500, 5000);
     } catch (err) {
       key('Escape');
       console.warn('JobDemon:', label, (err as Error).message);
@@ -317,6 +332,7 @@ export async function continueRun(say: Say, resume = false) {
       // Auto-submit (your switch on the bar): only a complete form, with nothing left for you and no messages on it.
       if ((await store.autoSubmit()) && !report.needs.length && !step.errors.length && !step.flagged.length) {
         log({ type: 'auto-submit', button: submit.text });
+        await quiet(1500, 8000);
         await click(submit, true);
         return stop(`Auto-submit: clicked "${submit.text}". Checking it went through…`);
       }
@@ -344,6 +360,8 @@ export async function continueRun(say: Say, resume = false) {
     say(`Next: "${next.text}"`);
     if (!tries) await ask({ t: 'did', action: 'pages' }).catch(() => {});
     log({ type: 'click', button: next.text, why: 'next page', attempt: tries + 1, in: next.frame === undefined ? 'page' : 'embedded form' });
+    await quiet(1500, 8000);
+    if (!(await stillOn())) return halted();
     await click(next);
     await waitForChange(step);
   }
