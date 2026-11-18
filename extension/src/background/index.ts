@@ -2,7 +2,7 @@
 // with your whole Setup as context. It also keeps a fill going across page loads and your history.
 import { answerQuestion } from '../shared/answer.js';
 import { buildContext } from '../shared/context.js';
-import type { FillReport, Look, Reply, Run, ToBackground, ToFrame } from '../shared/msg.js';
+import type { FillReport, FillStatus, Look, Reply, Run, ToBackground, ToFrame } from '../shared/msg.js';
 import { textToPdf } from '../shared/pdf.js';
 import { jobKey, profileVersion, store, toBase64, updateHistory } from '../shared/store.js';
 import type { Context, JobCtx } from '../shared/types.js';
@@ -61,14 +61,36 @@ async function report(tab: chrome.tabs.Tab) {
   return text.replace(/[^\s"@]+@[^\s"@]+\.[a-z]{2,}/gi, '[email]').replace(/(?<![\d-])\+?(?:\d[\s().-]*){10,15}(?![\d-])/g, '[number]');
 }
 
-/** Ask every frame inside the tab (not the page itself) to do something, one after another. */
-async function frames(tabId: number, m: ToFrame): Promise<FillReport> {
+/** Tell every frame inside the tab (not the page itself) something, one after another. */
+async function frames(tabId: number, m: ToFrame) {
   const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
-  const out: FillReport = { fields: 0, filled: 0, needs: [] };
+  for (const f of all.filter((x) => x.frameId !== 0 && /^https?:/.test(x.url))) await chrome.tabs.sendMessage(tabId, m, { frameId: f.frameId }).catch(() => {});
+  return null;
+}
+
+/** Start a fill in every frame inside the tab. Each answers at once and fills on its own; the page asks how it's
+ * going (fillStatus), so no single message waits out a long fill. The frames that started one. */
+async function startFills(tabId: number, retry?: boolean) {
+  const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
+  const ids: number[] = [];
   for (const f of all.filter((x) => x.frameId !== 0 && /^https?:/.test(x.url))) {
-    // A frame that loads a new page while filling never answers (some forms reload after reading your resume).
-    const r = (await chrome.tabs.sendMessage(tabId, m, { frameId: f.frameId }).catch((e: Error) => { if (!/receiving end does not exist/i.test(e.message)) out.cut = true; return null; })) as Reply<FillReport | null> | null;
-    if (r?.ok && r.v) { out.fields += r.v.fields; out.filled += r.v.filled; out.needs.push(...r.v.needs); }
+    const r = (await chrome.tabs.sendMessage(tabId, { t: 'fill', retry } satisfies ToFrame, { frameId: f.frameId }).catch(() => null)) as Reply<boolean> | null;
+    if (r?.ok) ids.push(f.frameId);
+  }
+  return ids;
+}
+
+/** How the fills started in these frames are going. A frame that loaded a new page while filling has lost its fill. */
+async function fillStatus(tabId: number, ids: number[]): Promise<FillStatus> {
+  const live = new Set(((await chrome.webNavigation.getAllFrames({ tabId })) ?? []).map((f) => f.frameId));
+  const report: FillReport = { fields: 0, filled: 0, needs: [] };
+  const out: FillStatus = { busy: false, report };
+  for (const frameId of ids.filter((i) => live.has(i))) {
+    const r = (await chrome.tabs.sendMessage(tabId, { t: 'fill:status' } satisfies ToFrame, { frameId }).catch(() => null)) as Reply<FillStatus | null> | null;
+    const s = r?.ok ? r.v : null;
+    if (!s) report.cut = true;
+    else if (s.busy) { out.busy = true; out.said ??= s.said; }
+    else if (s.report) { report.fields += s.report.fields; report.filled += s.report.filled; report.needs.push(...s.report.needs); }
   }
   return out;
 }
@@ -155,7 +177,7 @@ async function handle(m: ToBackground, sender: chrome.runtime.MessageSender): Pr
     }
     case 'run:get': return ((await session.get(`run:${id}`))[`run:${id}`] as Run | undefined) ?? null;
     case 'run:set': return m.run ? session.set({ [`run:${id}`]: m.run }) : session.remove(`run:${id}`);
-    case 'frames': return frames(id, m.op === 'fill' ? { t: 'fill', retry: m.retry } : { t: m.op });
+    case 'frames': return m.op === 'fill' ? startFills(id, m.retry) : m.op === 'status' ? fillStatus(id, m.ids ?? []) : frames(id, { t: m.op });
     case 'frames:look': return looks(id, m.job);
     case 'uploads': {
       // The upload questions answered in this fill (a form that reloads after reading a file may not show it).
