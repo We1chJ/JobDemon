@@ -4,6 +4,8 @@ import type { Answer, JobCtx, Question } from './types.js';
 
 /** What a frame did when asked to fill its page. */
 export interface FillReport { fields: number; filled: number; needs: string[]; cut?: boolean; stuck?: string } // cut: a form reloaded while being filled; stuck: why the fill stopped at a question
+/** How a fill started in an embedded form is going: still busy (and what it's doing), or done with its report. */
+export interface FillStatus { busy: boolean; said?: string; report?: FillReport }
 /** What a page, or a form embedded in it, shows a run: enough to wait at a sign-in, find Next, and see it move on. */
 export interface Look {
   frame?: number; // the embedded form's frame (none: the page itself)
@@ -24,7 +26,7 @@ export type ToBackground =
   | { t: 'history'; patch: Partial<HistoryItem> }
   | { t: 'run:get' }
   | { t: 'run:set'; run: Run | null }
-  | { t: 'frames'; op: 'fill' | 'hover' | 'stop'; retry?: boolean }
+  | { t: 'frames'; op: 'fill' | 'status' | 'hover' | 'stop'; retry?: boolean; ids?: number[] }
   | { t: 'frames:look'; job?: boolean }
   | { t: 'uploads'; add?: string; clear?: boolean }
   | { t: 'frames:click'; frameId: number; text: string; submit?: boolean }
@@ -35,7 +37,7 @@ export type ToBackground =
   | { t: 'submit:done'; ok: boolean }
   | { t: 'open'; page: 'setup' | 'dashboard' | 'letter' };
 
-export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'hover' } | { t: 'show' } | { t: 'applied' } | { t: 'stop' } | { t: 'look'; job?: boolean } | { t: 'click'; text: string; submit?: boolean };
+export type ToFrame = { t: 'fill'; retry?: boolean } | { t: 'fill:status' } | { t: 'hover' } | { t: 'show' } | { t: 'applied' } | { t: 'stop' } | { t: 'look'; job?: boolean } | { t: 'click'; text: string; submit?: boolean };
 
 export type Reply<T> = { ok: true; v: T } | { ok: false; error: string };
 export type AnswerReply = Answer;

@@ -2,7 +2,7 @@
 // forms embedded in it), then Apply / Next / Save and Continue, page after page, stopping where the way on is Submit.
 // When the application runs inside a frame (iCIMS), the page drives it there: it reads the frame's buttons and
 // clicks them through the frame. The bot never clicks Submit. A run survives page loads: its state lives in the background.
-import { ask, type FillReport, type Look, type Run } from '../shared/msg.js';
+import { ask, type FillReport, type FillStatus, type Look, type Run } from '../shared/msg.js';
 import { portalName as portalOf } from '../shared/portal.js';
 import type { Answer } from '../shared/types.js';
 import { store, type Action } from '../shared/store.js';
@@ -158,10 +158,27 @@ export async function fillOne(control: Element, say: Say) {
   say(r.status === 'filled' ? `Filled "${f.label.slice(0, 40)}"` : r.detail);
 }
 
+/** Fill the forms embedded in the page: start them, then ask how they're going every 1.5 s, showing what they're doing,
+ * until they're done. However long a form takes (a slow AI, a tab in the background), the run keeps waiting for it. */
+async function fillFrames(say: Say, retry: boolean): Promise<FillReport> {
+  const none: FillReport = { fields: 0, filled: 0, needs: [] };
+  const ids = await ask<number[]>({ t: 'frames', op: 'fill', retry }).catch(() => [] as number[]);
+  let shown = '';
+  for (let misses = 0; ids.length && !stopping && misses < 10; ) {
+    await sleep(1500);
+    const s = await ask<FillStatus>({ t: 'frames', op: 'status', ids }).catch(() => null);
+    if (!s) { misses++; continue; } // the background is starting up again: ask again
+    misses = 0;
+    if (s.said && s.said !== shown) say((shown = s.said));
+    if (!s.busy) return s.report ?? none;
+  }
+  return none;
+}
+
 /** This frame plus every form embedded in the page (e.g. a Greenhouse form on a company's careers site). */
 async function fillAll(say: Say, retry = false): Promise<FillReport> {
   const here = await fillFrame(say, retry);
-  const frames: FillReport = top && !stopping ? await ask<FillReport>({ t: 'frames', op: 'fill', retry }).catch(() => ({ fields: 0, filled: 0, needs: [] })) : { fields: 0, filled: 0, needs: [] };
+  const frames: FillReport = top && !stopping ? await fillFrames(say, retry) : { fields: 0, filled: 0, needs: [] };
   return { fields: here.fields + frames.fields, filled: here.filled + frames.filled, needs: [...here.needs, ...frames.needs], cut: frames.cut, stuck: here.stuck };
 }
 
